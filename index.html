@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EZR · e-Zone Computers</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#0a0f1a; --panel:#111a2b; --line:#23304a; --line-soft:#1a2438; --text:#e7ecf5;
+    --text-dim:#8e9ab3; --text-faint:#5d6a85; --cyan:#2dd8e8; --cyan-dim:#1a8b96;
+    --amber:#f5a623; --green:#3ddc97; --red:#ef5a6f;
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  body{min-height:100vh;}
+  ::selection{background:var(--cyan-dim);color:#fff;}
+  #app{display:flex;min-height:100vh;}
+  .grain{position:fixed;inset:0;pointer-events:none;opacity:.035;
+    background-image:linear-gradient(var(--cyan) 1px,transparent 1px),linear-gradient(90deg,var(--cyan) 1px,transparent 1px);
+    background-size:42px 42px;z-index:0;}
+  #sidebar{width:212px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;position:relative;z-index:2;}
+  .brand{padding:20px 18px 14px 18px;border-bottom:1px solid var(--line);}
+  .brand .mark{font-family:var(--mono);font-size:11px;letter-spacing:3px;color:var(--cyan);}
+  .brand h1{margin:4px 0 2px 0;font-size:17px;font-weight:700;}
+  .brand .sub{font-size:11px;color:var(--text-faint);}
+  nav{flex:1;padding:10px 8px;overflow-y:auto;}
+  .navgroup-label{font-size:10px;letter-spacing:1.5px;color:var(--text-faint);text-transform:uppercase;padding:14px 10px 6px 10px;}
+  .navitem{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:7px;cursor:pointer;color:var(--text-dim);font-size:13.5px;margin-bottom:2px;border:1px solid transparent;transition:.12s;}
+  .navitem:hover{background:#17243c;color:var(--text);}
+  .navitem.active{background:#0e2230;color:var(--cyan);border-color:#1d4d57;}
+  .navitem .dot{width:6px;height:6px;border-radius:2px;background:var(--text-faint);flex-shrink:0;}
+  .navitem.active .dot{background:var(--cyan);}
+  .who-box{padding:14px 16px;border-top:1px solid var(--line);}
+  .who-box .name{font-size:13.5px;font-weight:600;}
+  .who-box .role{font-size:11px;color:var(--text-faint);margin-bottom:8px;}
+  #main{flex:1;position:relative;z-index:2;min-width:0;}
+  #topbar{display:flex;align-items:center;gap:14px;padding:14px 24px;border-bottom:1px solid var(--line);background:#0a0f1ac4;position:sticky;top:0;backdrop-filter:blur(6px);z-index:5;}
+  #topbar h2{font-size:16px;margin:0;flex-shrink:0;}
+  #search{flex:1;max-width:380px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;}
+  #search::placeholder{color:var(--text-faint);}
+  .save-pill{margin-left:auto;font-size:11px;color:var(--text-faint);font-family:var(--mono);display:flex;align-items:center;gap:6px;}
+  .save-pill .led{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);}
+  .save-pill .led.busy{background:var(--amber);box-shadow:0 0 6px var(--amber);}
+  #content{padding:22px 26px 60px 26px;}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:22px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;position:relative;overflow:hidden;}
+  .card .lbl{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.6px;}
+  .card .val{font-family:var(--mono);font-size:24px;margin-top:6px;font-weight:600;}
+  .card.accent::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--cyan);}
+  .card.warn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--amber);}
+  .card.good::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--green);}
+  .sec-head{display:flex;align-items:center;justify-content:space-between;margin:26px 0 12px 0;flex-wrap:wrap;gap:8px;}
+  .sec-head h3{font-size:14px;margin:0;color:var(--text);text-transform:uppercase;letter-spacing:1px;}
+  .sec-head h3 span{color:var(--text-faint);font-weight:400;text-transform:none;letter-spacing:0;margin-left:8px;font-size:12px;}
+  .btn{background:var(--cyan);color:#04181a;border:none;padding:8px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:.12s;}
+  .btn:hover{filter:brightness(1.1);}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text-dim);}
+  .btn.ghost:hover{border-color:var(--cyan-dim);color:var(--cyan);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  .btn.danger{background:var(--red);color:#2a0408;}
+  .btn.warn{background:var(--amber);color:#2a1900;}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{text-align:left;color:var(--text-faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:1px solid var(--line);font-weight:600;}
+  tbody td{padding:9px 10px;border-bottom:1px solid var(--line-soft);color:var(--text-dim);}
+  tbody tr:hover td{background:#0f1828;color:var(--text);}
+  .tbl-wrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;overflow-x:auto;}
+  .mono{font-family:var(--mono);}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-family:var(--mono);}
+  .pill.green{background:#0e3326;color:var(--green);}
+  .pill.amber{background:#3a2a06;color:var(--amber);}
+  .pill.gray{background:#1a2438;color:var(--text-faint);}
+  .empty{padding:34px;text-align:center;color:var(--text-faint);font-size:13px;}
+  .overlay{position:fixed;inset:0;background:#000c;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:50;overflow-y:auto;}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:100%;max-width:520px;padding:22px;}
+  .modal h3{margin:0 0 4px 0;font-size:16px;}
+  .modal .modal-sub{font-size:12px;color:var(--text-faint);margin-bottom:16px;}
+  .frow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}
+  .frow.full{grid-template-columns:1fr;}
+  .field label{display:block;font-size:11px;color:var(--text-faint);margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px;}
+  .field input,.field select,.field textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:7px;color:var(--text);padding:8px 10px;font-size:13px;font-family:var(--sans);}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--cyan-dim);}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;}
+  .tabbar{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .tabbtn{padding:8px 14px;font-size:12.5px;color:var(--text-faint);cursor:pointer;border-bottom:2px solid transparent;}
+  .tabbtn.active{color:var(--cyan);border-color:var(--cyan);}
+  .note{font-size:11.5px;color:var(--text-faint);background:#0e1626;border:1px dashed var(--line);border-radius:8px;padding:9px 12px;margin-bottom:16px;}
+  a.link{color:var(--cyan);cursor:pointer;text-decoration:none;}
+  a.link:hover{text-decoration:underline;}
+  .error-box{background:#3a1015;border:1px solid #5a1c24;color:var(--red);border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px;}
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:#1d2942;border-radius:6px;}
+  /* Login screen */
+  #loginWrap{min-height:100vh;width:100%;display:flex;align-items:center;justify-content:center;position:relative;z-index:2;}
+  .login-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:34px 30px;width:100%;max-width:360px;}
+  .login-card .mark{font-family:var(--mono);font-size:11px;letter-spacing:3px;color:var(--cyan);text-align:center;}
+  .login-card h1{text-align:center;margin:6px 0 4px 0;font-size:19px;}
+  .login-card .sub{text-align:center;font-size:12px;color:var(--text-faint);margin-bottom:22px;}
+  @media(max-width:880px){
+    #sidebar{width:64px;}
+    .brand h1,.brand .sub,.brand .mark,.navitem span.label,.navgroup-label,.who-box .name,.who-box .role{display:none;}
+    .navitem{justify-content:center;}
+    #search{max-width:160px;}
+    .frow{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+<div id="app">
+  <div style="padding:60px;color:#5d6a85;font-family:monospace;">Loading EZR system…</div>
+</div>
+
+<script>
+/* =========================================================================
+   EZR — CONFIG
+   Fill these in from your Supabase project (Project Settings → API)
+   before deploying. See SETUP-GUIDE.md for step-by-step instructions.
+========================================================================= */
+const SUPABASE_URL = 'https://hybhdqtnyqfpbljvcmom.supabase.co/rest/v1/';       // e.g. https://abcxyz.supabase.co
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh5YmhkcXRueXFmcGJsanZjbW9tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMxMTI0ODUsImV4cCI6MjA5ODY4ODQ4NX0.sdpCgXYn_Tzh_YWRRNgYE28TUwTpeTEwo1bX_r14OdQ';      // the "anon public" key
+
+/* ========================================================================= */
+
+let sb = null;
+let STATE = { tab:'dashboard', search:'', duesSubTab:'customer', reportSubTab:'quarterly', profile:null };
+let CACHE = { customers:[], sellers:[], banks:[], settings:{}, stock:[], purchases:[], sales:[], expenses:[], ledger:[] };
+let busy = false;
+
+/* ---------- Utilities ---------- */
+const pad = (n,len)=> String(n).padStart(len,'0');
+const inr = (n)=> '₹' + Number(n||0).toLocaleString('en-IN');
+const todayISO = ()=> new Date().toISOString().slice(0,10);
+const fmtDate = (iso)=>{ if(!iso) return '—'; const d=new Date(iso+'T00:00:00'); if(isNaN(d)) return iso;
+  return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function setBusy(v){ busy = v; const el = document.getElementById('savePill'); if(el) el.innerHTML = busy
+  ? '<span class="led busy"></span> syncing…' : '<span class="led"></span> live'; }
+
+/* ---------- Month & quarter helpers ---------- */
+function monthLabel(ym){ if(!ym) return '—'; const [y,m]=ym.split('-').map(Number); return new Date(y,m-1,1).toLocaleDateString('en-GB',{month:'long',year:'numeric'}); }
+function allDataMonths(){
+  const months = new Set();
+  [...CACHE.sales, ...CACHE.purchases, ...CACHE.expenses, ...CACHE.ledger].forEach(r=>{ if(r.date) months.add(r.date.slice(0,7)); });
+  months.add(todayISO().slice(0,7));
+  return [...months].sort();
+}
+function shiftMonth(ym, delta){ let [y,m]=ym.split('-').map(Number); m+=delta; while(m>12){m-=12;y++;} while(m<1){m+=12;y--;} return y+'-'+pad(m,2); }
+function ensureMonthState(key){ if(!STATE[key]){ const months=allDataMonths(); STATE[key]=months.length?months[months.length-1]:todayISO().slice(0,7); } return STATE[key]; }
+function setMonthState(key,value){ if(value) STATE[key]=value; renderContent(); }
+function shiftMonthState(key,delta){ STATE[key]=shiftMonth(ensureMonthState(key),delta); renderContent(); }
+function monthSwitcherHTML(key,label){
+  const ym = ensureMonthState(key); const months = allDataMonths();
+  return `<div class="sec-head" style="margin-top:0;"><h3>${label} <span>${monthLabel(ym)}</span></h3>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <button class="btn ghost small" onclick="shiftMonthState('${key}',-1)">‹ Prev</button>
+      <select onchange="setMonthState('${key}', this.value)" style="background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:7px;padding:6px 10px;font-size:12.5px;">
+        ${months.map(m=>`<option value="${m}" ${m===ym?'selected':''}>${monthLabel(m)}</option>`).join('')}
+      </select>
+      <button class="btn ghost small" onclick="shiftMonthState('${key}',1)">Next ›</button>
+    </div></div>`;
+}
+function quarterOfMonth(mNum){ return Math.floor((mNum-1)/3)+1; }
+function ymToQuarterKey(ym){ const [y,m]=ym.split('-').map(Number); return y+'-Q'+quarterOfMonth(m); }
+function quarterLabel(qKey){ const [y,q]=qKey.split('-Q'); const r={1:'Jan–Mar',2:'Apr–Jun',3:'Jul–Sep',4:'Oct–Dec'}; return `${r[q]} ${y} (Q${q})`; }
+
+/* ---------- Derived values ---------- */
+function stockTotalCost(s){ if(!s) return 0; const mods=(s.modifications||[]).reduce((sum,m)=>sum+Number(m.cost||0),0); return Number(s.purchasePrice||0)+mods; }
+function saleGrossProfit(sale){ const st = CACHE.stock.find(x=>x.id===sale.stockId); return st ? Number(sale.salePrice||0)-stockTotalCost(st) : null; }
+function cashOpening(){ return Number(CACHE.settings.cash_opening||0); }
+function cashBalance(){ return cashOpening() + CACHE.ledger.filter(l=>l.mode==='Cash').reduce((s,l)=>s+Number(l.amount),0); }
+function bankBalance(id){ const b=CACHE.banks.find(x=>x.id===id); if(!b) return 0; return Number(b.openingBalance||0)+CACHE.ledger.filter(l=>l.mode==='Bank'&&l.bankId===id).reduce((s,l)=>s+Number(l.amount),0); }
+function totalBankBalance(){ return CACHE.banks.reduce((s,b)=>s+bankBalance(b.id),0); }
+function totalStockInStock(){ return CACHE.stock.filter(s=>s.status==='In Stock').length; }
+function totalCustomerDue(){ return CACHE.sales.reduce((s,x)=>s+Number(x.due||0),0); }
+function totalSellerDue(){ return CACHE.purchases.reduce((s,x)=>s+Number(x.due||0),0); }
+function sellerName(id){ const s=CACHE.sellers.find(x=>x.id===id); return s?s.name:'—'; }
+function customerName(id){ const c=CACHE.customers.find(x=>x.id===id); return c?c.name:'—'; }
+function bankName(id){ const b=CACHE.banks.find(x=>x.id===id); return b?b.name:'—'; }
+function isAdmin(){ return STATE.profile && STATE.profile.role==='Admin'; }
+
+/* ---------- Supabase data layer ---------- */
+async function genId(seqName, prefix, padLen){
+  const { data, error } = await sb.rpc('generate_id', { seq_name:seqName, prefix, pad_len:padLen });
+  if(error) throw error;
+  return data;
+}
+async function insertLedger({date,type,mode,bankId,amount,refType,refId,note}){
+  await sb.from('ledger').insert({
+    date: date||todayISO(), type, mode, bank_id: bankId||null, amount,
+    ref_type: refType||null, ref_id: refId||null, note: note||'',
+    created_by: STATE.profile.id, created_by_name: STATE.profile.fullName
+  });
+}
+async function fetchAll(){
+  setBusy(true);
+  const [customers, sellers, banks, settings, stock, mods, purchases, sales, expenses, ledger] = await Promise.all([
+    sb.from('customers').select('*').order('name'),
+    sb.from('sellers').select('*').order('name'),
+    sb.from('banks').select('*'),
+    sb.from('settings').select('*'),
+    sb.from('stock').select('*').order('id',{ascending:false}),
+    sb.from('stock_modifications').select('*'),
+    sb.from('purchases').select('*').order('date',{ascending:false}),
+    sb.from('sales').select('*').order('date',{ascending:false}),
+    sb.from('expenses').select('*').order('date',{ascending:false}),
+    sb.from('ledger').select('*').order('date',{ascending:false}),
+  ]);
+  CACHE.customers = customers.data || [];
+  CACHE.sellers = sellers.data || [];
+  CACHE.banks = (banks.data||[]).map(b=>({id:b.id,name:b.name,accountNumber:b.account_number,openingBalance:b.opening_balance}));
+  CACHE.settings = {}; (settings.data||[]).forEach(s=>CACHE.settings[s.key]=s.value);
+  const modsList = mods.data || [];
+  CACHE.stock = (stock.data||[]).map(s=>({
+    id:s.id, category:s.category, condition:s.condition, status:s.status, model:s.model, processor:s.processor,
+    ram:s.ram, gpu:s.gpu, ssd:s.ssd, hdd:s.hdd, display:s.display, serial:s.serial, accessoryType:s.accessory_type,
+    brand:s.brand, description:s.description, purchasePrice:s.purchase_price, purchaseDate:s.purchase_date,
+    sellerId:s.seller_id, sellerName:s.seller_name, notes:s.notes, createdByName:s.created_by_name,
+    modifications: modsList.filter(m=>m.stock_id===s.id).map(m=>({description:m.description,cost:m.cost,date:m.date,mode:m.mode,bankId:m.bank_id,createdByName:m.created_by_name}))
+  }));
+  CACHE.purchases = (purchases.data||[]).map(p=>({id:p.id,stockId:p.stock_id,sellerId:p.seller_id,sellerName:p.seller_name,
+    productLabel:p.product_label,purchasePrice:p.purchase_price,qty:p.qty,date:p.date,paymentMode:p.payment_mode,
+    bankId:p.bank_id,amountPaid:p.amount_paid,due:p.due,createdByName:p.created_by_name}));
+  CACHE.sales = (sales.data||[]).map(s=>({id:s.id,billNo:s.bill_no,stockId:s.stock_id,stockLabel:s.stock_label,
+    buyerId:s.buyer_id,buyerName:s.buyer_name,salePrice:s.sale_price,date:s.date,paymentMode:s.payment_mode,
+    bankId:s.bank_id,amountReceived:s.amount_received,due:s.due,createdByName:s.created_by_name}));
+  CACHE.expenses = (expenses.data||[]).map(e=>({id:e.id,category:e.category,amount:e.amount,paymentMode:e.payment_mode,
+    bankId:e.bank_id,date:e.date,note:e.note,createdByName:e.created_by_name}));
+  CACHE.ledger = (ledger.data||[]).map(l=>({id:l.id,date:l.date,type:l.type,mode:l.mode,bankId:l.bank_id,amount:l.amount,
+    refType:l.ref_type,refId:l.ref_id,note:l.note,createdByName:l.created_by_name}));
+  setBusy(false);
+}
+let realtimeChannel = null;
+function subscribeRealtime(){
+  if(realtimeChannel) return;
+  realtimeChannel = sb.channel('ezr-live')
+    .on('postgres_changes', { event:'*', schema:'public' }, async ()=>{ await fetchAll(); renderContent(); })
+    .subscribe();
+}
+
+/* ---------- Auth ---------- */
+async function initApp(){
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  if(SUPABASE_URL.startsWith('YOUR_')){
+    document.getElementById('app').innerHTML = `<div style="padding:60px;max-width:560px;margin:0 auto;font-family:sans-serif;color:#e7ecf5;">
+      <h2>Setup needed</h2><p style="color:#8e9ab3;">Open this file and fill in <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> near the top of the &lt;script&gt; section. See SETUP-GUIDE.md for exact steps.</p></div>`;
+    return;
+  }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(session){ await afterLogin(session.user); } else { renderLogin(); }
+  sb.auth.onAuthStateChange((event)=>{ if(event==='SIGNED_OUT'){ realtimeChannel=null; renderLogin(); } });
+}
+function renderLogin(errorMsg){
+  document.getElementById('app').innerHTML = `
+    <div id="loginWrap">
+      <div class="login-card">
+        <div class="mark">e-ZONE COMPUTERS</div>
+        <h1>EZR System</h1>
+        <div class="sub">Sign in to continue</div>
+        ${errorMsg?`<div class="error-box">${escapeHtml(errorMsg)}</div>`:''}
+        <div class="field" style="margin-bottom:10px;"><label>Email</label><input id="loginEmail" type="email" placeholder="you@ezone.com"></div>
+        <div class="field" style="margin-bottom:16px;"><label>Password</label><input id="loginPassword" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter') doLogin()"></div>
+        <button class="btn" style="width:100%;" onclick="doLogin()">Sign In</button>
+      </div>
+    </div>`;
+  document.getElementById('loginEmail')?.focus();
+}
+async function doLogin(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  if(!email || !password){ renderLogin('Enter your email and password.'); return; }
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ renderLogin(error.message); return; }
+  await afterLogin(data.user);
+}
+async function signOut(){ await sb.auth.signOut(); }
+async function afterLogin(user){
+  const { data:profile, error } = await sb.from('profiles').select('*').eq('id', user.id).single();
+  if(error || !profile){ renderLogin('This login has no profile set up yet. Ask your Admin to add you in the profiles table.'); await sb.auth.signOut(); return; }
+  STATE.profile = { id:profile.id, fullName:profile.full_name, role:profile.role };
+  await fetchAll();
+  render();
+  subscribeRealtime();
+}
+
+/* ---------- Render shell ---------- */
+function render(){
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div id="sidebar">
+      <div class="brand"><div class="mark">e-ZONE COMPUTERS</div><h1>EZR System</h1><div class="sub">Inventory &amp; Sales Management</div></div>
+      <nav id="nav"></nav>
+      <div class="who-box">
+        <div class="name">${escapeHtml(STATE.profile.fullName)}</div>
+        <div class="role">${STATE.profile.role}</div>
+        <button class="btn ghost small" style="width:100%;" onclick="signOut()">Sign Out</button>
+      </div>
+    </div>
+    <div id="main">
+      <div id="topbar">
+        <h2 id="pageTitle"></h2>
+        <input id="search" placeholder="Global search: stock ID, buyer, seller, invoice, phone…" value="${escapeHtml(STATE.search)}" oninput="onSearch(this.value)">
+        <div class="save-pill" id="savePill"><span class="led"></span> live</div>
+      </div>
+      <div id="content"></div>
+    </div>`;
+  buildNav();
+  document.getElementById('search').addEventListener('keydown', e=>{ if(e.key==='Enter') renderContent(); });
+  renderContent();
+}
+const NAV = [
+  {group:'Overview', items:[['dashboard','Dashboard']]},
+  {group:'Operations', items:[['transactions','Transactions'],['stock','Stock'],['sales','Sales'],['purchases','Purchases']]},
+  {group:'Accounts', items:[['dues','Dues'],['customers','Customers & Suppliers'],['banks','Payment Management'],['expenses','Expenses']]},
+  {group:'Insights', items:[['reports','Reports']]}
+];
+function buildNav(){
+  const nav = document.getElementById('nav'); let html = '';
+  NAV.forEach(g=>{
+    html += `<div class="navgroup-label">${g.group}</div>`;
+    g.items.forEach(([key,label])=>{
+      if(!isAdmin() && (key==='banks' || key==='reports')) return;
+      html += `<div class="navitem ${STATE.tab===key?'active':''}" onclick="goTab('${key}')"><span class="dot"></span><span class="label">${label}</span></div>`;
+    });
+  });
+  nav.innerHTML = html;
+}
+function goTab(key){ STATE.tab=key; STATE.search=''; buildNav(); renderContent(); }
+function onSearch(v){ STATE.search=v; }
+function renderContent(){
+  const c = document.getElementById('content'); const title = document.getElementById('pageTitle');
+  const map = {dashboard:'Dashboard',transactions:'Transactions',stock:'Stock Management',sales:'Sales',purchases:'Purchases',
+    dues:'Dues',customers:'Customers & Suppliers',banks:'Payment Management',expenses:'Expense Management',reports:'Reports'};
+  title.textContent = map[STATE.tab] || '';
+  if((STATE.tab==='reports' || STATE.tab==='banks') && !isAdmin()){
+    c.innerHTML = `<div class="tbl-wrap"><div class="empty">This section is visible to Admin accounts only.</div></div>`; return;
+  }
+  if(STATE.search && STATE.search.trim().length>0){ c.innerHTML = renderGlobalSearch(STATE.search.trim()); return; }
+  switch(STATE.tab){
+    case 'dashboard': c.innerHTML = renderDashboard(); break;
+    case 'transactions': c.innerHTML = renderTransactions(); break;
+    case 'stock': c.innerHTML = renderStock(); break;
+    case 'sales': c.innerHTML = renderSales(); break;
+    case 'purchases': c.innerHTML = renderPurchases(); break;
+    case 'dues': c.innerHTML = renderDues(); break;
+    case 'customers': c.innerHTML = renderCustomers(); break;
+    case 'banks': c.innerHTML = renderBanks(); break;
+    case 'expenses': c.innerHTML = renderExpenses(); break;
+    case 'reports': c.innerHTML = renderReports(); break;
+  }
+}
+function tableOrEmpty(rows, headers, rowFn){
+  if(!rows.length) return `<div class="tbl-wrap"><div class="empty">No records yet.</div></div>`;
+  return `<div class="tbl-wrap"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(rowFn).join('')}</tbody></table></div>`;
+}
+
+/* ================= DASHBOARD ================= */
+function renderDashboard(){
+  const ym = ensureMonthState('dashMonth');
+  const monthSales = CACHE.sales.filter(s=>s.date && s.date.slice(0,7)===ym);
+  const monthPurchases = CACHE.purchases.filter(p=>p.date && p.date.slice(0,7)===ym);
+  const monthExpenses = CACHE.expenses.filter(e=>e.date && e.date.slice(0,7)===ym);
+  const monthLedger = CACHE.ledger.filter(l=>l.date && l.date.slice(0,7)===ym);
+  const monthSalesTotal = monthSales.reduce((s,x)=>s+Number(x.salePrice||0),0);
+  const monthPurchaseTotal = monthPurchases.reduce((s,x)=>s+Number(x.purchasePrice||0)*(x.qty||1),0);
+  const monthExpenseTotal = monthExpenses.reduce((s,x)=>s+Number(x.amount||0),0);
+  const recentSales = [...monthSales].sort((a,b)=>b.date.localeCompare(a.date));
+  const recentLedger = [...monthLedger].sort((a,b)=>b.date.localeCompare(a.date));
+  return `
+    ${monthSwitcherHTML('dashMonth','Dashboard —')}
+    <div class="cards">
+      <div class="card accent"><div class="lbl">Sales — ${monthLabel(ym)}</div><div class="val">${inr(monthSalesTotal)}</div></div>
+      <div class="card accent"><div class="lbl">Purchases — ${monthLabel(ym)}</div><div class="val">${inr(monthPurchaseTotal)}</div></div>
+      <div class="card warn"><div class="lbl">Expenses — ${monthLabel(ym)}</div><div class="val">${inr(monthExpenseTotal)}</div></div>
+      <div class="card accent"><div class="lbl">Stock In Stock <span style="font-size:9px;">(now)</span></div><div class="val">${totalStockInStock()}</div></div>
+      <div class="card warn"><div class="lbl">Customer Dues <span style="font-size:9px;">(now)</span></div><div class="val">${inr(totalCustomerDue())}</div></div>
+      <div class="card good"><div class="lbl">Cash Balance <span style="font-size:9px;">(now)</span></div><div class="val">${inr(cashBalance())}</div></div>
+      <div class="card good"><div class="lbl">Bank Balance <span style="font-size:9px;">(now)</span></div><div class="val">${inr(totalBankBalance())}</div></div>
+    </div>
+    <div class="note">Sales, Purchases and Expenses reflect the selected month. Stock/Dues/Cash/Bank are running totals as of today. Profit &amp; margins live in Reports (Admin only). Data syncs live across every device signed in.</div>
+    <div class="sec-head"><h3>Sales in ${monthLabel(ym)}</h3><a class="link" onclick="goTab('sales')">View all →</a></div>
+    ${tableOrEmpty(recentSales, ['Date','Invoice','Item','Buyer','Amount','Due'], r=>`
+      <tr><td>${fmtDate(r.date)}</td><td class="mono">${r.id}</td><td>${escapeHtml(r.stockLabel||r.stockId||'—')}</td>
+      <td>${escapeHtml(r.buyerName||'—')}</td><td class="mono">${inr(r.salePrice)}</td>
+      <td>${r.due>0?`<span class="pill amber">${inr(r.due)}</span>`:`<span class="pill green">Paid</span>`}</td></tr>`)}
+    <div class="sec-head"><h3>Ledger Activity in ${monthLabel(ym)}</h3><a class="link" onclick="goTab('transactions')">View all →</a></div>
+    ${tableOrEmpty(recentLedger, ['Date','Type','Mode','By','Amount'], r=>`
+      <tr><td>${fmtDate(r.date)}</td><td>${r.type}${r.note?' · '+escapeHtml(r.note):''}</td><td>${r.mode}${r.bankId?' · '+bankName(r.bankId):''}</td>
+      <td>${escapeHtml(r.createdByName||'—')}</td><td class="mono" style="color:${r.amount<0?'var(--red)':'var(--green)'}">${r.amount<0?'-':'+'}${inr(Math.abs(r.amount))}</td></tr>`)}
+  `;
+}
+
+/* ================= TRANSACTIONS ================= */
+function renderTransactions(){
+  const ym = ensureMonthState('txMonth');
+  const rows = CACHE.ledger.filter(l=>l.date && l.date.slice(0,7)===ym).sort((a,b)=>b.date.localeCompare(a.date)||String(b.id).localeCompare(String(a.id)));
+  const monthTotal = rows.reduce((s,r)=>s+Number(r.amount),0);
+  return `
+    ${monthSwitcherHTML('txMonth','Transactions —')}
+    <div class="sec-head"><h3>Daily Transactions <span>net ${monthTotal<0?'-':'+'}${inr(Math.abs(monthTotal))} this month</span></h3>
+      <button class="btn" onclick="openQuickTxModal()">+ Add Transaction</button></div>
+    ${tableOrEmpty(rows, ['Date','Type','Mode','Bank','Reference','Note','By','Amount'], r=>`
+      <tr><td>${fmtDate(r.date)}</td><td>${r.type}</td><td>${r.mode}</td><td>${r.bankId?bankName(r.bankId):'—'}</td>
+      <td class="mono">${r.refType?r.refType+' '+r.refId:'—'}</td><td>${escapeHtml(r.note||'')}</td>
+      <td>${escapeHtml(r.createdByName||'—')}</td>
+      <td class="mono" style="color:${r.amount<0?'var(--red)':'var(--green)'}">${r.amount<0?'-':'+'}${inr(Math.abs(r.amount))}</td></tr>`)}
+  `;
+}
+function openQuickTxModal(){
+  showModal(`
+    <h3>Add Transaction</h3>
+    <div class="modal-sub">Record a payment received or a spending/expense directly.</div>
+    <div class="frow full"><div class="field"><label>Transaction Type</label><select id="tx_type"><option>Payment Received</option><option>Spending/Expense</option></select></div></div>
+    <div class="frow"><div class="field"><label>Date</label><input id="tx_date" type="date" value="${todayISO()}"></div>
+      <div class="field"><label>Amount (₹)</label><input id="tx_amount" type="number" min="0"></div></div>
+    <div class="frow"><div class="field"><label>Payment Mode</label><select id="tx_mode" onchange="toggleBankField('tx')"><option>Cash</option><option>Online</option></select></div>
+      <div class="field" id="tx_bankWrap" style="display:none;"><label>Bank</label><select id="tx_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
+    <div class="frow full"><div class="field"><label>Note</label><input id="tx_note" placeholder="e.g. Advance from customer / shop supplies"></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="tx_save" onclick="saveQuickTx()">Save Transaction</button></div>
+  `);
+}
+function toggleBankField(prefix){ document.getElementById(prefix+'_bankWrap').style.display = document.getElementById(prefix+'_mode').value==='Online' ? 'block':'none'; }
+async function saveQuickTx(){
+  const btn = document.getElementById('tx_save'); btn.disabled = true;
+  const type = document.getElementById('tx_type').value;
+  const date = document.getElementById('tx_date').value || todayISO();
+  const amount = Number(document.getElementById('tx_amount').value||0);
+  const mode = document.getElementById('tx_mode').value;
+  const bankId = mode==='Online' ? document.getElementById('tx_bank').value : '';
+  const note = document.getElementById('tx_note').value;
+  if(amount<=0){ alert('Enter an amount greater than 0.'); btn.disabled=false; return; }
+  const signed = type==='Spending/Expense' ? -amount : amount;
+  try{
+    await insertLedger({date, type, mode:mode==='Online'?'Bank':'Cash', bankId, amount:signed, refType:'manual', refId:'', note});
+    if(type==='Spending/Expense'){
+      const id = await genId('expense_seq','EXP',4);
+      await sb.from('expenses').insert({id, category:'Miscellaneous', amount, payment_mode:mode, bank_id:bankId||null, date, note,
+        created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    }
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
+/* ================= STOCK ================= */
+function renderStock(){
+  const items = [...CACHE.stock].sort((a,b)=>b.id.localeCompare(a.id));
+  return `
+    <div class="sec-head"><h3>Stock <span>${items.length} items · ${totalStockInStock()} in stock</span></h3>
+      <button class="btn" onclick="openStockModal()">+ Add Stock Item</button></div>
+    ${tableOrEmpty(items, ['Stock ID','Category','Condition','Item','Purchase ₹','Parts Added ₹','Total Cost ₹','Seller','Status','Action'], r=>{
+      const modsCost = (r.modifications||[]).reduce((s,m)=>s+Number(m.cost||0),0);
+      return `<tr><td class="mono">${r.id}</td><td>${r.category}</td><td>${r.condition}</td>
+      <td>${escapeHtml(r.category==='Accessories' ? (r.accessoryType+' — '+(r.description||r.brand||'')) : (r.model||'—'))}</td>
+      <td class="mono">${inr(r.purchasePrice)}</td><td class="mono">${modsCost>0?inr(modsCost):'—'}</td>
+      <td class="mono">${inr(stockTotalCost(r))}</td><td>${escapeHtml(r.sellerName||'—')}</td>
+      <td>${r.status==='Sold'?'<span class="pill gray">Sold</span>':'<span class="pill green">In Stock</span>'}</td>
+      <td>${r.status==='In Stock'?`<a class="link" onclick="openPartsModal('${r.id}')">+ Add Parts</a>`:'—'}</td></tr>`;
+    })}
+    <div class="note">Use <b>+ Add Parts</b> when modifying/upgrading an old desktop (or any item) before reselling — the added cost is included in Total Cost so profit stays accurate.</div>
+  `;
+}
+function openStockModal(){
+  showModal(`
+    <h3>Add Stock Item</h3><div class="modal-sub">A Stock ID is generated automatically.</div>
+    <div class="frow"><div class="field"><label>Category</label><select id="st_cat" onchange="toggleStockFields()"><option>Laptop</option><option>Desktop</option><option>Accessories</option></select></div>
+      <div class="field"><label>Condition</label><select id="st_cond"><option>New</option><option>Old</option></select></div></div>
+    <div id="st_fields"></div>
+    <div class="frow"><div class="field"><label>Purchase Price (₹)</label><input id="st_price" type="number" min="0"></div>
+      <div class="field"><label>Purchase Date</label><input id="st_date" type="date" value="${todayISO()}"></div></div>
+    <div class="frow full"><div class="field"><label>Seller</label><select id="st_seller"><option value="">— select —</option>${CACHE.sellers.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="st_save" onclick="saveStock()">Save Item</button></div>
+  `);
+  toggleStockFields();
+}
+function toggleStockFields(){
+  const cat = document.getElementById('st_cat').value; const wrap = document.getElementById('st_fields');
+  if(cat==='Accessories'){
+    wrap.innerHTML = `<div class="frow"><div class="field"><label>Accessory Type</label><select id="st_accType"><option>Mouse</option><option>Keyboard</option><option>Charger</option><option>Adapter</option><option>RAM</option><option>SSD</option><option>HDD</option><option>Cable</option><option>Speaker</option><option>Others</option></select></div>
+      <div class="field"><label>Brand</label><input id="st_brand"></div></div>
+      <div class="frow full"><div class="field"><label>Description</label><input id="st_desc"></div></div>`;
+  } else {
+    wrap.innerHTML = `<div class="frow"><div class="field"><label>Model</label><input id="st_model"></div><div class="field"><label>Processor</label><input id="st_proc"></div></div>
+      <div class="frow"><div class="field"><label>RAM</label><input id="st_ram"></div><div class="field"><label>Graphics Card</label><input id="st_gpu"></div></div>
+      <div class="frow"><div class="field"><label>SSD</label><input id="st_ssd"></div><div class="field"><label>HDD</label><input id="st_hdd"></div></div>
+      <div class="frow"><div class="field"><label>Display Size</label><input id="st_display"></div><div class="field"><label>Serial Number</label><input id="st_serial"></div></div>`;
+  }
+}
+async function saveStock(){
+  const btn = document.getElementById('st_save'); btn.disabled = true;
+  try{
+    const cat = document.getElementById('st_cat').value, cond = document.getElementById('st_cond').value;
+    const price = Number(document.getElementById('st_price').value||0);
+    const date = document.getElementById('st_date').value || todayISO();
+    const sellerId = document.getElementById('st_seller').value;
+    const sellerNameVal = sellerId ? sellerName(sellerId) : '';
+    let model='',processor='',ram='',gpu='',ssd='',hdd='',display='',serial='',accessoryType='',brand='',description='';
+    if(cat==='Accessories'){ accessoryType=document.getElementById('st_accType').value; brand=document.getElementById('st_brand').value; description=document.getElementById('st_desc').value; }
+    else { model=document.getElementById('st_model').value; processor=document.getElementById('st_proc').value; ram=document.getElementById('st_ram').value;
+      gpu=document.getElementById('st_gpu').value; ssd=document.getElementById('st_ssd').value; hdd=document.getElementById('st_hdd').value;
+      display=document.getElementById('st_display').value; serial=document.getElementById('st_serial').value; }
+    const id = await genId('stock_seq','EZR',4);
+    await sb.from('stock').insert({id, category:cat, condition:cond, status:'In Stock', model, processor, ram, gpu, ssd, hdd, display, serial,
+      accessory_type:accessoryType, brand, description, purchase_price:price, purchase_date:date, seller_id:sellerId||null, seller_name:sellerNameVal,
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    const purchaseId = await genId('purchase_seq','PUR',4);
+    await sb.from('purchases').insert({id:purchaseId, stock_id:id, seller_id:sellerId||null, seller_name:sellerNameVal,
+      product_label: cat==='Accessories'?accessoryType:model, purchase_price:price, qty:1, date, payment_mode:'Cash', amount_paid:price, due:0,
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    await insertLedger({date, type:'Purchase', mode:'Cash', bankId:'', amount:-price, refType:'stock', refId:id, note:'Stock purchase: '+id});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+function openPartsModal(stockId){
+  const item = CACHE.stock.find(s=>s.id===stockId);
+  showModal(`
+    <h3>Add Parts / Modification</h3>
+    <div class="modal-sub">${stockId} — ${escapeHtml(item.model||item.accessoryType||item.category)} · Current total cost: <b>${inr(stockTotalCost(item))}</b></div>
+    <div class="frow full"><div class="field"><label>Part / Work Description</label><input id="pt_desc" placeholder="e.g. Added GTX 1650 4GB, new SMPS"></div></div>
+    <div class="frow"><div class="field"><label>Cost (₹)</label><input id="pt_cost" type="number" min="0"></div><div class="field"><label>Date</label><input id="pt_date" type="date" value="${todayISO()}"></div></div>
+    <div class="frow"><div class="field"><label>Payment Mode</label><select id="pt_mode" onchange="toggleBankField('pt')"><option>Cash</option><option>Online</option></select></div>
+      <div class="field" id="pt_bankWrap" style="display:none;"><label>Bank</label><select id="pt_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
+    ${(item.modifications||[]).length ? `<div class="note">Existing parts: ${item.modifications.map(m=>escapeHtml(m.description)+' ('+inr(m.cost)+')').join(', ')}</div>` : ''}
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="pt_save" onclick="saveParts('${stockId}')">Add to Stock Item</button></div>
+  `);
+}
+async function saveParts(stockId){
+  const btn = document.getElementById('pt_save'); btn.disabled = true;
+  try{
+    const desc = document.getElementById('pt_desc').value.trim();
+    const cost = Number(document.getElementById('pt_cost').value||0);
+    const date = document.getElementById('pt_date').value || todayISO();
+    const mode = document.getElementById('pt_mode').value;
+    const bankId = mode==='Online' ? document.getElementById('pt_bank').value : '';
+    if(!desc){ alert('Enter a description.'); btn.disabled=false; return; }
+    if(cost<=0){ alert('Enter a valid cost.'); btn.disabled=false; return; }
+    await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost, date, mode, bank_id:bankId||null,
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    await insertLedger({date, type:'Modification/Parts', mode, bankId, amount:-cost, refType:'stock', refId:stockId, note:'Parts for '+stockId+': '+desc});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
+/* ================= SALES ================= */
+function renderSales(){
+  const ym = ensureMonthState('salesMonth');
+  const rows = CACHE.sales.filter(s=>s.date && s.date.slice(0,7)===ym).sort((a,b)=>b.date.localeCompare(a.date));
+  const monthTotal = rows.reduce((s,x)=>s+Number(x.salePrice||0),0);
+  return `
+    ${monthSwitcherHTML('salesMonth','Sales —')}
+    <div class="sec-head"><h3>Sales <span>${rows.length} invoices · ${inr(monthTotal)} in ${monthLabel(ym)}</span></h3>
+      <button class="btn" onclick="openSaleModal()">+ New Sale</button></div>
+    ${tableOrEmpty(rows, ['Date','Invoice','Item','Buyer','Sale ₹','Received','Due','By'], r=>`
+      <tr><td>${fmtDate(r.date)}</td><td class="mono">${r.id}</td><td>${escapeHtml(r.stockLabel||'—')}</td>
+      <td>${escapeHtml(r.buyerName||'—')}</td><td class="mono">${inr(r.salePrice)}</td><td class="mono">${inr(r.amountReceived)}</td>
+      <td>${r.due>0?`<span class="pill amber">${inr(r.due)}</span>`:`<span class="pill green">Paid</span>`}</td>
+      <td>${escapeHtml(r.createdByName||'—')}</td></tr>`)}
+  `;
+}
+function openSaleModal(){
+  const available = CACHE.stock.filter(s=>s.status==='In Stock');
+  showModal(`
+    <h3>New Sale</h3>
+    <div class="frow full"><div class="field"><label>Stock Item</label><select id="sl_stock"><option value="">— select in-stock item —</option>
+      ${available.map(s=>`<option value="${s.id}">${s.id} — ${escapeHtml(s.category==='Accessories'?(s.accessoryType+' '+(s.description||'')):(s.model||s.category))}</option>`).join('')}</select></div></div>
+    <div class="frow"><div class="field"><label>Buyer</label><select id="sl_buyer"><option value="">— select —</option>
+      ${CACHE.customers.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}<option value="__new__">+ New buyer…</option></select></div>
+      <div class="field" id="sl_newBuyerWrap" style="display:none;"><label>New Buyer Name</label><input id="sl_newBuyer"></div></div>
+    <div class="frow"><div class="field"><label>Selling Price (₹)</label><input id="sl_price" type="number" min="0"></div>
+      <div class="field"><label>Date</label><input id="sl_date" type="date" value="${todayISO()}"></div></div>
+    <div class="frow"><div class="field"><label>Payment Mode</label><select id="sl_mode" onchange="toggleBankField('sl')"><option>Cash</option><option>Online</option></select></div>
+      <div class="field" id="sl_bankWrap" style="display:none;"><label>Bank</label><select id="sl_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
+    <div class="frow full"><div class="field"><label>Amount Received (₹)</label><input id="sl_received" type="number" min="0"></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="sl_save" onclick="saveSale()">Save Sale</button></div>
+  `);
+  document.getElementById('sl_buyer').addEventListener('change', e=>{ document.getElementById('sl_newBuyerWrap').style.display = e.target.value==='__new__'?'block':'none'; });
+}
+async function saveSale(){
+  const btn = document.getElementById('sl_save'); btn.disabled = true;
+  try{
+    const stockId = document.getElementById('sl_stock').value;
+    if(!stockId){ alert('Select a stock item.'); btn.disabled=false; return; }
+    const stockItem = CACHE.stock.find(s=>s.id===stockId);
+    let buyerSel = document.getElementById('sl_buyer').value, buyerId, buyerNameVal;
+    if(buyerSel==='__new__'){
+      const name = document.getElementById('sl_newBuyer').value.trim();
+      if(!name){ alert('Enter the new buyer name.'); btn.disabled=false; return; }
+      buyerId = await genId('customer_seq','CUS',4);
+      await sb.from('customers').insert({id:buyerId, name, phone:'', address:''});
+      buyerNameVal = name;
+    } else if(buyerSel){ buyerId = buyerSel; buyerNameVal = customerName(buyerSel); }
+    else { alert('Select a buyer.'); btn.disabled=false; return; }
+    const price = Number(document.getElementById('sl_price').value||0);
+    const date = document.getElementById('sl_date').value || todayISO();
+    const mode = document.getElementById('sl_mode').value;
+    const bankId = mode==='Online' ? document.getElementById('sl_bank').value : '';
+    const received = Number(document.getElementById('sl_received').value||0);
+    const due = Math.max(0, price-received);
+    const invoiceId = await genId('invoice_seq','INV',4);
+    const stockLabel = stockItem.category==='Accessories'?(stockItem.accessoryType+' '+(stockItem.description||'')):(stockItem.model||stockItem.category);
+    await sb.from('sales').insert({id:invoiceId, bill_no:invoiceId, stock_id:stockId, stock_label:stockLabel, buyer_id:buyerId, buyer_name:buyerNameVal,
+      sale_price:price, date, payment_mode:mode, bank_id:bankId||null, amount_received:received, due,
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    await sb.from('stock').update({status:'Sold'}).eq('id', stockId);
+    if(received>0) await insertLedger({date, type:'Sale', mode:mode==='Online'?'Bank':'Cash', bankId, amount:received, refType:'sale', refId:invoiceId, note:'Sale '+invoiceId+' — '+stockId});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
+/* ================= PURCHASES ================= */
+function renderPurchases(){
+  const ym = ensureMonthState('purchaseMonth');
+  const rows = CACHE.purchases.filter(p=>p.date && p.date.slice(0,7)===ym).sort((a,b)=>b.date.localeCompare(a.date));
+  const monthTotal = rows.reduce((s,x)=>s+Number(x.purchasePrice||0)*(x.qty||1),0);
+  return `
+    ${monthSwitcherHTML('purchaseMonth','Purchases —')}
+    <div class="sec-head"><h3>Purchases <span>${rows.length} records · ${inr(monthTotal)} in ${monthLabel(ym)}</span></h3>
+      <button class="btn" onclick="openPurchaseModal()">+ New Purchase</button></div>
+    ${tableOrEmpty(rows, ['Date','Purchase ID','Item','Seller','Price ₹','Paid','Due','By'], r=>`
+      <tr><td>${fmtDate(r.date)}</td><td class="mono">${r.id}</td><td>${escapeHtml(r.productLabel||'—')}</td>
+      <td>${escapeHtml(r.sellerName||'—')}</td><td class="mono">${inr(r.purchasePrice*(r.qty||1))}</td><td class="mono">${inr(r.amountPaid)}</td>
+      <td>${r.due>0?`<span class="pill amber">${inr(r.due)}</span>`:`<span class="pill green">Paid</span>`}</td>
+      <td>${escapeHtml(r.createdByName||'—')}</td></tr>`)}
+    <div class="note">New purchases automatically add a matching Stock item (condition: Old, status: In Stock).</div>
+  `;
+}
+function openPurchaseModal(){
+  showModal(`
+    <h3>New Purchase</h3>
+    <div class="frow"><div class="field"><label>Seller</label><select id="pu_seller"><option value="">— select —</option>
+      ${CACHE.sellers.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}<option value="__new__">+ New seller…</option></select></div>
+      <div class="field" id="pu_newSellerWrap" style="display:none;"><label>New Seller Name</label><input id="pu_newSeller"></div></div>
+    <div class="frow"><div class="field"><label>Category</label><select id="pu_cat"><option>Laptop</option><option>Desktop</option><option>Accessories</option></select></div>
+      <div class="field"><label>Item / Description</label><input id="pu_desc" placeholder="e.g. HP i5 11th/16gb/512gb"></div></div>
+    <div class="frow"><div class="field"><label>Purchase Price (₹)</label><input id="pu_price" type="number" min="0"></div>
+      <div class="field"><label>Quantity</label><input id="pu_qty" type="number" min="1" value="1"></div></div>
+    <div class="frow"><div class="field"><label>Payment Mode</label><select id="pu_mode" onchange="toggleBankField('pu')"><option>Cash</option><option>Online</option></select></div>
+      <div class="field" id="pu_bankWrap" style="display:none;"><label>Bank</label><select id="pu_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
+    <div class="frow"><div class="field"><label>Amount Paid (₹)</label><input id="pu_paid" type="number" min="0"></div>
+      <div class="field"><label>Date</label><input id="pu_date" type="date" value="${todayISO()}"></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="pu_save" onclick="savePurchase()">Save Purchase</button></div>
+  `);
+  document.getElementById('pu_seller').addEventListener('change', e=>{ document.getElementById('pu_newSellerWrap').style.display = e.target.value==='__new__'?'block':'none'; });
+}
+async function savePurchase(){
+  const btn = document.getElementById('pu_save'); btn.disabled = true;
+  try{
+    let sellerSel = document.getElementById('pu_seller').value, sellerId, sellerNameVal;
+    if(sellerSel==='__new__'){
+      const name = document.getElementById('pu_newSeller').value.trim();
+      if(!name){ alert('Enter the new seller name.'); btn.disabled=false; return; }
+      sellerId = await genId('seller_seq','SEL',4);
+      await sb.from('sellers').insert({id:sellerId, name, phone:'', address:''});
+      sellerNameVal = name;
+    } else if(sellerSel){ sellerId = sellerSel; sellerNameVal = sellerName(sellerSel); }
+    else { alert('Select a seller.'); btn.disabled=false; return; }
+    const cat = document.getElementById('pu_cat').value;
+    const desc = document.getElementById('pu_desc').value.trim();
+    const price = Number(document.getElementById('pu_price').value||0);
+    const qty = Number(document.getElementById('pu_qty').value||1);
+    const mode = document.getElementById('pu_mode').value;
+    const bankId = mode==='Online' ? document.getElementById('pu_bank').value : '';
+    const paid = Number(document.getElementById('pu_paid').value||0);
+    const date = document.getElementById('pu_date').value || todayISO();
+    const due = Math.max(0, (price*qty)-paid);
+    const stockId = await genId('stock_seq','EZR',4);
+    await sb.from('stock').insert({id:stockId, category:cat, condition:'Old', status:'In Stock', purchase_price:price, purchase_date:date,
+      seller_id:sellerId, seller_name:sellerNameVal, model: cat!=='Accessories'?desc:'', accessory_type: cat==='Accessories'?desc:'', description: cat==='Accessories'?desc:'',
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    const purchaseId = await genId('purchase_seq','PUR',4);
+    await sb.from('purchases').insert({id:purchaseId, stock_id:stockId, seller_id:sellerId, seller_name:sellerNameVal, product_label:desc,
+      purchase_price:price, qty, date, payment_mode:mode, bank_id:bankId||null, amount_paid:paid, due,
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    if(paid>0) await insertLedger({date, type:'Purchase', mode:mode==='Online'?'Bank':'Cash', bankId, amount:-paid, refType:'purchase', refId:purchaseId, note:'Purchase '+purchaseId});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
+/* ================= DUES ================= */
+function renderDues(){
+  const sub = STATE.duesSubTab;
+  const custDues = CACHE.sales.filter(s=>s.due>0).sort((a,b)=>b.due-a.due);
+  const sellDues = CACHE.purchases.filter(p=>p.due>0).sort((a,b)=>b.due-a.due);
+  return `
+    <div class="tabbar">
+      <div class="tabbtn ${sub==='customer'?'active':''}" onclick="setDuesTab('customer')">Customer Dues (${custDues.length})</div>
+      <div class="tabbtn ${sub==='seller'?'active':''}" onclick="setDuesTab('seller')">Seller Dues (${sellDues.length})</div>
+    </div>
+    ${sub==='customer' ? `
+      <div class="sec-head"><h3>Customer Dues <span>${inr(totalCustomerDue())} outstanding</span></h3></div>
+      ${tableOrEmpty(custDues, ['Invoice','Buyer','Mobile','Sale ₹','Paid','Due','Date','Action'], r=>{
+        const c = CACHE.customers.find(x=>x.id===r.buyerId);
+        return `<tr><td class="mono">${r.id}</td><td>${escapeHtml(r.buyerName||'—')}</td><td>${escapeHtml(c&&c.phone||'—')}</td>
+        <td class="mono">${inr(r.salePrice)}</td><td class="mono">${inr(r.amountReceived)}</td><td><span class="pill amber">${inr(r.due)}</span></td>
+        <td>${fmtDate(r.date)}</td><td><button class="btn small" onclick="openDuePayModal('sale','${r.id}')">Receive Payment</button></td></tr>`;
+      })}
+    ` : `
+      <div class="sec-head"><h3>Seller Dues <span>${inr(totalSellerDue())} outstanding</span></h3></div>
+      ${tableOrEmpty(sellDues, ['Purchase ID','Seller','Total ₹','Paid','Due','Date','Action'], r=>`
+        <tr><td class="mono">${r.id}</td><td>${escapeHtml(r.sellerName||'—')}</td><td class="mono">${inr(r.purchasePrice*(r.qty||1))}</td>
+        <td class="mono">${inr(r.amountPaid)}</td><td><span class="pill amber">${inr(r.due)}</span></td><td>${fmtDate(r.date)}</td>
+        <td><button class="btn small warn" onclick="openDuePayModal('purchase','${r.id}')">Pay Seller</button></td></tr>`)}
+    `}
+  `;
+}
+function setDuesTab(t){ STATE.duesSubTab=t; renderContent(); }
+function openDuePayModal(refType, refId){
+  const isSale = refType==='sale';
+  const rec = isSale ? CACHE.sales.find(x=>x.id===refId) : CACHE.purchases.find(x=>x.id===refId);
+  showModal(`
+    <h3>${isSale?'Receive Payment':'Pay Seller'}</h3>
+    <div class="modal-sub">${isSale?escapeHtml(rec.buyerName):escapeHtml(rec.sellerName)} · Outstanding: <b style="color:var(--amber)">${inr(rec.due)}</b></div>
+    <div class="frow"><div class="field"><label>Amount (₹)</label><input id="dp_amount" type="number" min="0" max="${rec.due}" value="${rec.due}"></div>
+      <div class="field"><label>Date</label><input id="dp_date" type="date" value="${todayISO()}"></div></div>
+    <div class="frow"><div class="field"><label>Mode</label><select id="dp_mode" onchange="toggleBankField('dp')"><option>Cash</option><option>Online</option></select></div>
+      <div class="field" id="dp_bankWrap" style="display:none;"><label>Bank</label><select id="dp_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="dp_save" onclick="saveDuePayment('${refType}','${refId}')">Confirm</button></div>
+  `);
+}
+async function saveDuePayment(refType, refId){
+  const btn = document.getElementById('dp_save'); btn.disabled = true;
+  try{
+    const amount = Number(document.getElementById('dp_amount').value||0);
+    const date = document.getElementById('dp_date').value || todayISO();
+    const mode = document.getElementById('dp_mode').value;
+    const bankId = mode==='Online' ? document.getElementById('dp_bank').value : '';
+    if(amount<=0){ alert('Enter a valid amount.'); btn.disabled=false; return; }
+    if(refType==='sale'){
+      const rec = CACHE.sales.find(x=>x.id===refId); const applied = Math.min(amount, rec.due);
+      await sb.from('sales').update({amount_received:rec.amountReceived+applied, due:rec.due-applied}).eq('id', refId);
+      await insertLedger({date, type:'Payment Received', mode:mode==='Online'?'Bank':'Cash', bankId, amount:applied, refType:'sale', refId, note:'Due payment for '+refId});
+    } else {
+      const rec = CACHE.purchases.find(x=>x.id===refId); const applied = Math.min(amount, rec.due);
+      await sb.from('purchases').update({amount_paid:rec.amountPaid+applied, due:rec.due-applied}).eq('id', refId);
+      await insertLedger({date, type:'Payment', mode:mode==='Online'?'Bank':'Cash', bankId, amount:-applied, refType:'purchase', refId, note:'Due payment for '+refId});
+    }
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
+/* ================= CUSTOMERS & SUPPLIERS ================= */
+function renderCustomers(){
+  return `
+    <div class="sec-head"><h3>Buyers</h3><button class="btn" onclick="openPersonModal('customer')">+ Add Buyer</button></div>
+    ${tableOrEmpty(CACHE.customers, ['ID','Name','Phone','Address',''], c=>`
+      <tr><td class="mono">${c.id}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.phone||'—')}</td><td>${escapeHtml(c.address||'—')}</td>
+      <td><a class="link" onclick="openPersonModal('customer','${c.id}')">Edit</a></td></tr>`)}
+    <div class="sec-head"><h3>Sellers / Suppliers</h3><button class="btn" onclick="openPersonModal('seller')">+ Add Seller</button></div>
+    ${tableOrEmpty(CACHE.sellers, ['ID','Name','Phone','Address',''], s=>`
+      <tr><td class="mono">${s.id}</td><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.phone||'—')}</td><td>${escapeHtml(s.address||'—')}</td>
+      <td><a class="link" onclick="openPersonModal('seller','${s.id}')">Edit</a></td></tr>`)}
+  `;
+}
+function openPersonModal(kind, id){
+  const list = kind==='customer' ? CACHE.customers : CACHE.sellers;
+  const rec = id ? list.find(x=>x.id===id) : null;
+  showModal(`
+    <h3>${rec?'Edit':'Add'} ${kind==='customer'?'Buyer':'Seller'}</h3>
+    <div class="frow full"><div class="field"><label>Name</label><input id="pm_name" value="${escapeHtml(rec?rec.name:'')}"></div></div>
+    <div class="frow"><div class="field"><label>Phone</label><input id="pm_phone" value="${escapeHtml(rec?rec.phone:'')}"></div>
+      <div class="field"><label>Address</label><input id="pm_addr" value="${escapeHtml(rec?rec.address:'')}"></div></div>
+    <div class="modal-actions">
+      ${rec && isAdmin() ? `<button class="btn danger" onclick="deletePerson('${kind}','${id}')">Delete</button>`:''}
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="pm_save" onclick="savePerson('${kind}','${id||''}')">Save</button>
+    </div>
+  `);
+}
+async function savePerson(kind, id){
+  const btn = document.getElementById('pm_save'); btn.disabled = true;
+  try{
+    const name = document.getElementById('pm_name').value.trim();
+    if(!name){ alert('Name is required.'); btn.disabled=false; return; }
+    const phone = document.getElementById('pm_phone').value.trim();
+    const addr = document.getElementById('pm_addr').value.trim();
+    const table = kind==='customer' ? 'customers' : 'sellers';
+    if(id){ await sb.from(table).update({name, phone, address:addr}).eq('id', id); }
+    else { const newId = kind==='customer' ? await genId('customer_seq','CUS',4) : await genId('seller_seq','SEL',4);
+      await sb.from(table).insert({id:newId, name, phone, address:addr}); }
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+async function deletePerson(kind, id){
+  if(!confirm('Delete this record?')) return;
+  try{ await sb.from(kind==='customer'?'customers':'sellers').delete().eq('id', id); await fetchAll(); closeModal(); render(); }
+  catch(e){ alert('Delete failed: '+e.message); }
+}
+
+/* ================= PAYMENT MANAGEMENT (Admin only) ================= */
+function renderBanks(){
+  return `
+    <div class="cards">
+      <div class="card good"><div class="lbl">Cash Balance</div><div class="val">${inr(cashBalance())}</div></div>
+      ${CACHE.banks.map(b=>`<div class="card accent"><div class="lbl">${escapeHtml(b.name)}</div><div class="val">${inr(bankBalance(b.id))}</div></div>`).join('')}
+    </div>
+    <div class="sec-head"><h3>Cash</h3><a class="link" onclick="openCashModal()">Edit Opening Balance</a></div>
+    <div class="sec-head"><h3>Bank Accounts</h3><button class="btn" onclick="openBankModal()">+ Add Bank</button></div>
+    ${tableOrEmpty(CACHE.banks, ['ID','Bank','Account No.','Opening Balance','Current Balance',''], b=>`
+      <tr><td class="mono">${b.id}</td><td>${escapeHtml(b.name)}</td><td>${escapeHtml(b.accountNumber||'—')}</td>
+      <td class="mono">${inr(b.openingBalance)}</td><td class="mono">${inr(bankBalance(b.id))}</td>
+      <td><a class="link" onclick="openBankModal('${b.id}')">Edit</a> &nbsp; <a class="link" onclick="viewBankHistory('${b.id}')">History</a></td></tr>`)}
+    <div id="bankHistoryArea"></div>
+  `;
+}
+function openCashModal(){
+  showModal(`
+    <h3>Edit Cash Opening Balance</h3>
+    <div class="frow full"><div class="field"><label>Opening Balance (₹)</label><input id="cash_open" type="number" value="${cashOpening()}"></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="cash_save" onclick="saveCashOpening()">Save</button></div>
+  `);
+}
+async function saveCashOpening(){
+  const btn = document.getElementById('cash_save'); btn.disabled = true;
+  try{
+    const val = Number(document.getElementById('cash_open').value||0);
+    const exists = 'cash_opening' in CACHE.settings;
+    if(exists) await sb.from('settings').update({value:val}).eq('key','cash_opening');
+    else await sb.from('settings').insert({key:'cash_opening', value:val});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+function openBankModal(id){
+  const rec = id ? CACHE.banks.find(b=>b.id===id) : null;
+  showModal(`
+    <h3>${rec?'Edit':'Add'} Bank</h3>
+    <div class="frow full"><div class="field"><label>Bank Name</label><input id="bk_name" value="${escapeHtml(rec?rec.name:'')}"></div></div>
+    <div class="frow"><div class="field"><label>Account Number (optional)</label><input id="bk_acc" value="${escapeHtml(rec?rec.accountNumber:'')}"></div>
+      <div class="field"><label>Opening Balance (₹)</label><input id="bk_open" type="number" value="${rec?rec.openingBalance:0}"></div></div>
+    <div class="modal-actions">
+      ${rec?`<button class="btn danger" onclick="deleteBank('${id}')">Delete</button>`:''}
+      <button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="bk_save" onclick="saveBank('${id||''}')">Save</button>
+    </div>
+  `);
+}
+async function saveBank(id){
+  const btn = document.getElementById('bk_save'); btn.disabled = true;
+  try{
+    const name = document.getElementById('bk_name').value.trim();
+    if(!name){ alert('Bank name required.'); btn.disabled=false; return; }
+    const acc = document.getElementById('bk_acc').value.trim();
+    const open = Number(document.getElementById('bk_open').value||0);
+    if(id){ await sb.from('banks').update({name, account_number:acc, opening_balance:open}).eq('id', id); }
+    else { const newId = 'BNK'+pad(CACHE.banks.length+1,3); await sb.from('banks').insert({id:newId, name, account_number:acc, opening_balance:open}); }
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+async function deleteBank(id){
+  if(!confirm('Delete this bank account?')) return;
+  try{ await sb.from('banks').delete().eq('id', id); await fetchAll(); closeModal(); render(); }
+  catch(e){ alert('Delete failed: '+e.message); }
+}
+function viewBankHistory(id){
+  const rows = CACHE.ledger.filter(l=>l.mode==='Bank' && l.bankId===id).sort((a,b)=>b.date.localeCompare(a.date));
+  document.getElementById('bankHistoryArea').innerHTML = `
+    <div class="sec-head"><h3>${escapeHtml(bankName(id))} — Transaction History</h3></div>
+    ${tableOrEmpty(rows, ['Date','Type','Note','By','Amount'], r=>`
+      <tr><td>${fmtDate(r.date)}</td><td>${r.type}</td><td>${escapeHtml(r.note||'')}</td><td>${escapeHtml(r.createdByName||'—')}</td>
+      <td class="mono" style="color:${r.amount<0?'var(--red)':'var(--green)'}">${r.amount<0?'-':'+'}${inr(Math.abs(r.amount))}</td></tr>`)}
+  `;
+}
+
+/* ================= EXPENSES ================= */
+function renderExpenses(){
+  const rows = [...CACHE.expenses].sort((a,b)=>b.date.localeCompare(a.date));
+  const total = rows.reduce((s,e)=>s+Number(e.amount||0),0);
+  return `
+    <div class="sec-head"><h3>Expenses <span>${rows.length} entries · ${inr(total)} total</span></h3>
+      <button class="btn" onclick="openExpenseModal()">+ Add Expense</button></div>
+    ${tableOrEmpty(rows, ['Date','Expense ID','Category','Note','Mode','By','Amount'], r=>`
+      <tr><td>${fmtDate(r.date)}</td><td class="mono">${r.id}</td><td>${escapeHtml(r.category)}</td><td>${escapeHtml(r.note||'—')}</td>
+      <td>${r.paymentMode}${r.bankId?' · '+bankName(r.bankId):''}</td><td>${escapeHtml(r.createdByName||'—')}</td><td class="mono">${inr(r.amount)}</td></tr>`)}
+  `;
+}
+function openExpenseModal(){
+  showModal(`
+    <h3>Add Expense</h3>
+    <div class="frow"><div class="field"><label>Category</label><select id="ex_cat"><option>Rent</option><option>Electricity</option><option>Internet</option><option>Salary</option><option>Office Expense</option><option>Miscellaneous</option></select></div>
+      <div class="field"><label>Amount (₹)</label><input id="ex_amount" type="number" min="0"></div></div>
+    <div class="frow"><div class="field"><label>Payment Mode</label><select id="ex_mode" onchange="toggleBankField('ex')"><option>Cash</option><option>Online</option></select></div>
+      <div class="field" id="ex_bankWrap" style="display:none;"><label>Bank</label><select id="ex_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
+    <div class="frow"><div class="field"><label>Date</label><input id="ex_date" type="date" value="${todayISO()}"></div><div class="field"><label>Note</label><input id="ex_note"></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="ex_save" onclick="saveExpense()">Save Expense</button></div>
+  `);
+}
+async function saveExpense(){
+  const btn = document.getElementById('ex_save'); btn.disabled = true;
+  try{
+    const category = document.getElementById('ex_cat').value;
+    const amount = Number(document.getElementById('ex_amount').value||0);
+    if(amount<=0){ alert('Enter a valid amount.'); btn.disabled=false; return; }
+    const mode = document.getElementById('ex_mode').value;
+    const bankId = mode==='Online' ? document.getElementById('ex_bank').value : '';
+    const date = document.getElementById('ex_date').value || todayISO();
+    const note = document.getElementById('ex_note').value;
+    const id = await genId('expense_seq','EXP',4);
+    await sb.from('expenses').insert({id, category, amount, payment_mode:mode, bank_id:bankId||null, date, note,
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    await insertLedger({date, type:'Spending/Expense', mode:mode==='Online'?'Bank':'Cash', bankId, amount:-amount, refType:'expense', refId:id, note:category+(note?' — '+note:'')});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
+/* ================= REPORTS (Admin only) ================= */
+function renderReports(){
+  const sub = STATE.reportSubTab;
+  const tabs = [['quarterly','Quarterly Report'],['profit','Profit Report'],['sales','Monthly Sales'],
+    ['purchases','Purchase Report'],['expenses','Expense Report'],['dues','Due Report'],['banks','Bank Transactions'],['stock','Stock Report']];
+  let body = '';
+  if(sub==='quarterly'){
+    const byQ = {}; const touch=(q)=>{ if(!byQ[q]) byQ[q]={sales:0,purchases:0,expenses:0,gross:0}; return byQ[q]; };
+    CACHE.sales.forEach(s=>{ if(!s.date) return; const q=ymToQuarterKey(s.date.slice(0,7)); const b=touch(q); b.sales+=Number(s.salePrice||0); const gp=saleGrossProfit(s); if(gp!==null) b.gross+=gp; });
+    CACHE.purchases.forEach(p=>{ if(!p.date) return; touch(ymToQuarterKey(p.date.slice(0,7))).purchases += Number(p.purchasePrice||0)*(p.qty||1); });
+    CACHE.expenses.forEach(e=>{ if(!e.date) return; touch(ymToQuarterKey(e.date.slice(0,7))).expenses += Number(e.amount||0); });
+    const rows = Object.entries(byQ).sort((a,b)=>b[0].localeCompare(a[0]));
+    const t = rows.reduce((a,[,b])=>({sales:a.sales+b.sales,purchases:a.purchases+b.purchases,expenses:a.expenses+b.expenses,gross:a.gross+b.gross}),{sales:0,purchases:0,expenses:0,gross:0});
+    body = `<div class="cards">
+      <div class="card accent"><div class="lbl">Total Sales</div><div class="val">${inr(t.sales)}</div></div>
+      <div class="card accent"><div class="lbl">Total Purchases</div><div class="val">${inr(t.purchases)}</div></div>
+      <div class="card warn"><div class="lbl">Total Expenses</div><div class="val">${inr(t.expenses)}</div></div>
+      <div class="card good"><div class="lbl">Net Profit</div><div class="val" style="color:${(t.gross-t.expenses)>=0?'var(--green)':'var(--red)'}">${inr(t.gross-t.expenses)}</div></div>
+    </div>` + tableOrEmpty(rows, ['Quarter','Sales','Purchases','Expenses','Gross Profit','Net Profit'], ([q,b])=>{
+      const net=b.gross-b.expenses;
+      return `<tr><td class="mono">${quarterLabel(q)}</td><td class="mono">${inr(b.sales)}</td><td class="mono">${inr(b.purchases)}</td>
+      <td class="mono">${inr(b.expenses)}</td><td class="mono" style="color:var(--green)">${inr(b.gross)}</td>
+      <td class="mono" style="color:${net>=0?'var(--green)':'var(--red)'}">${inr(net)}</td></tr>`;
+    });
+  } else if(sub==='profit'){
+    const byMonth = {}; const touchM=(m)=>{ if(!byMonth[m]) byMonth[m]={gross:0,expenses:0}; return byMonth[m]; };
+    CACHE.sales.forEach(s=>{ if(!s.date) return; const gp=saleGrossProfit(s); if(gp===null) return; touchM(s.date.slice(0,7)).gross+=gp; });
+    CACHE.expenses.forEach(e=>{ if(!e.date) return; touchM(e.date.slice(0,7)).expenses += Number(e.amount||0); });
+    const monthRows = Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0]));
+    const totalGross = monthRows.reduce((s,[,b])=>s+b.gross,0), totalExp = monthRows.reduce((s,[,b])=>s+b.expenses,0), totalNet = totalGross-totalExp;
+    const sold = CACHE.stock.filter(s=>s.status==='Sold');
+    const itemRows = sold.map(s=>{
+      const sale = CACHE.sales.find(x=>x.stockId===s.id); const cost = stockTotalCost(s);
+      const profit = sale ? Number(sale.salePrice)-cost : null;
+      const modsCost = (s.modifications||[]).reduce((sum,m)=>sum+Number(m.cost||0),0);
+      return {id:s.id, label:s.model||s.accessoryType||s.category, basePrice:s.purchasePrice, modsCost, cost, sale: sale?sale.salePrice:0, profit};
+    }).filter(r=>r.profit!==null);
+    body = `<div class="cards">
+        <div class="card good"><div class="lbl">Gross Profit (all time)</div><div class="val" style="color:var(--green)">${inr(totalGross)}</div></div>
+        <div class="card warn"><div class="lbl">Total Expenses (all time)</div><div class="val">${inr(totalExp)}</div></div>
+        <div class="card ${totalNet>=0?'good':'warn'}"><div class="lbl">Net Profit (all time)</div><div class="val" style="color:${totalNet>=0?'var(--green)':'var(--red)'}">${inr(totalNet)}</div></div>
+      </div>
+      <div class="note">Gross Profit = Sale Price − Total Cost (purchase price + any parts/modification cost added). Net Profit = Gross Profit − Expenses. Sales with no linked stock item (repairs, loose parts) are excluded from gross profit.</div>
+      <div class="sec-head"><h3>Monthly Gross vs Net Profit</h3></div>
+      ${tableOrEmpty(monthRows, ['Month','Gross Profit','Expenses','Net Profit'], ([m,b])=>{
+        const net=b.gross-b.expenses;
+        return `<tr><td class="mono">${monthLabel(m)}</td><td class="mono" style="color:var(--green)">${inr(b.gross)}</td>
+        <td class="mono">${inr(b.expenses)}</td><td class="mono" style="color:${net>=0?'var(--green)':'var(--red)'}">${inr(net)}</td></tr>`;
+      })}
+      <div class="sec-head"><h3>Per-Item Profit (incl. parts/modification cost)</h3></div>
+      ${tableOrEmpty(itemRows, ['Stock ID','Item','Base Cost ₹','Parts ₹','Total Cost ₹','Sold ₹','Profit ₹'], r=>`
+      <tr><td class="mono">${r.id}</td><td>${escapeHtml(r.label)}</td><td class="mono">${inr(r.basePrice)}</td>
+      <td class="mono">${r.modsCost>0?inr(r.modsCost):'—'}</td><td class="mono">${inr(r.cost)}</td><td class="mono">${inr(r.sale)}</td>
+      <td class="mono" style="color:${r.profit>=0?'var(--green)':'var(--red)'}">${inr(r.profit)}</td></tr>`)}`;
+  } else if(sub==='sales'){
+    const byMonth = {}; CACHE.sales.forEach(s=>{ const m=(s.date||'').slice(0,7); byMonth[m]=(byMonth[m]||0)+Number(s.salePrice||0); });
+    body = tableOrEmpty(Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])), ['Month','Total Sales'], ([m,v])=>`<tr><td class="mono">${monthLabel(m)}</td><td class="mono">${inr(v)}</td></tr>`);
+  } else if(sub==='purchases'){
+    const byMonth = {}; CACHE.purchases.forEach(p=>{ const m=(p.date||'').slice(0,7); byMonth[m]=(byMonth[m]||0)+Number(p.purchasePrice||0)*(p.qty||1); });
+    body = tableOrEmpty(Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])), ['Month','Total Purchases'], ([m,v])=>`<tr><td class="mono">${monthLabel(m)}</td><td class="mono">${inr(v)}</td></tr>`);
+  } else if(sub==='expenses'){
+    const byCat = {}; CACHE.expenses.forEach(e=>{ byCat[e.category]=(byCat[e.category]||0)+Number(e.amount||0); });
+    body = tableOrEmpty(Object.entries(byCat).sort((a,b)=>b[1]-a[1]), ['Category','Total'], ([c,v])=>`<tr><td>${c}</td><td class="mono">${inr(v)}</td></tr>`);
+  } else if(sub==='dues'){
+    body = `<div class="sec-head"><h3>Customer Dues</h3></div>` +
+      tableOrEmpty(CACHE.sales.filter(s=>s.due>0), ['Invoice','Buyer','Due'], r=>`<tr><td class="mono">${r.id}</td><td>${escapeHtml(r.buyerName)}</td><td class="mono">${inr(r.due)}</td></tr>`) +
+      `<div class="sec-head"><h3>Seller Dues</h3></div>` +
+      tableOrEmpty(CACHE.purchases.filter(p=>p.due>0), ['Purchase ID','Seller','Due'], r=>`<tr><td class="mono">${r.id}</td><td>${escapeHtml(r.sellerName)}</td><td class="mono">${inr(r.due)}</td></tr>`);
+  } else if(sub==='banks'){
+    body = tableOrEmpty([...CACHE.ledger].sort((a,b)=>b.date.localeCompare(a.date)), ['Date','Type','Mode','Bank','By','Amount'], r=>`
+      <tr><td>${fmtDate(r.date)}</td><td>${r.type}</td><td>${r.mode}</td><td>${r.bankId?bankName(r.bankId):'—'}</td><td>${escapeHtml(r.createdByName||'—')}</td>
+      <td class="mono" style="color:${r.amount<0?'var(--red)':'var(--green)'}">${r.amount<0?'-':'+'}${inr(Math.abs(r.amount))}</td></tr>`);
+  } else if(sub==='stock'){
+    body = tableOrEmpty(CACHE.stock, ['Stock ID','Category','Condition','Status','Total Cost ₹'], r=>`
+      <tr><td class="mono">${r.id}</td><td>${r.category}</td><td>${r.condition}</td>
+      <td>${r.status==='Sold'?'<span class="pill gray">Sold</span>':'<span class="pill green">In Stock</span>'}</td><td class="mono">${inr(stockTotalCost(r))}</td></tr>`);
+  }
+  return `
+    <div class="note" style="border-color:var(--cyan-dim);">Reports are visible to Admin accounts only.</div>
+    <div class="tabbar">${tabs.map(([k,l])=>`<div class="tabbtn ${sub===k?'active':''}" onclick="setReportTab('${k}')">${l}</div>`).join('')}</div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button class="btn ghost small" onclick="exportCSV('${sub}')">Export CSV (Excel)</button>
+      <button class="btn ghost small" onclick="window.print()">Print / Save as PDF</button>
+    </div>
+    ${body}
+  `;
+}
+function setReportTab(t){ STATE.reportSubTab=t; renderContent(); }
+function exportCSV(sub){
+  let rows = [], headers = [];
+  if(sub==='quarterly'){
+    const byQ={}; const touch=(q)=>{ if(!byQ[q]) byQ[q]={sales:0,purchases:0,expenses:0,gross:0}; return byQ[q]; };
+    CACHE.sales.forEach(s=>{ if(!s.date) return; const q=ymToQuarterKey(s.date.slice(0,7)); const b=touch(q); b.sales+=Number(s.salePrice||0); const gp=saleGrossProfit(s); if(gp!==null) b.gross+=gp; });
+    CACHE.purchases.forEach(p=>{ if(!p.date) return; touch(ymToQuarterKey(p.date.slice(0,7))).purchases += Number(p.purchasePrice||0)*(p.qty||1); });
+    CACHE.expenses.forEach(e=>{ if(!e.date) return; touch(ymToQuarterKey(e.date.slice(0,7))).expenses += Number(e.amount||0); });
+    headers=['Quarter','Sales','Purchases','Expenses','Gross Profit','Net Profit'];
+    rows = Object.entries(byQ).map(([q,b])=>[quarterLabel(q), b.sales, b.purchases, b.expenses, b.gross, b.gross-b.expenses]);
+  } else if(sub==='profit'){
+    headers=['Stock ID','Item','Base Cost','Parts Cost','Total Cost','Sold','Profit'];
+    rows = CACHE.stock.filter(s=>s.status==='Sold').map(s=>{
+      const sale = CACHE.sales.find(x=>x.stockId===s.id); const modsCost=(s.modifications||[]).reduce((sum,m)=>sum+Number(m.cost||0),0); const cost=stockTotalCost(s);
+      return [s.id, s.model||s.accessoryType||s.category, s.purchasePrice, modsCost, cost, sale?sale.salePrice:'', sale?Number(sale.salePrice)-cost:''];
+    });
+  } else if(sub==='sales'){ headers=['Date','Invoice','Item','Buyer','Sale','Received','Due']; rows = CACHE.sales.map(r=>[r.date,r.id,r.stockLabel,r.buyerName,r.salePrice,r.amountReceived,r.due]); }
+  else if(sub==='purchases'){ headers=['Date','Purchase ID','Item','Seller','Price','Paid','Due']; rows = CACHE.purchases.map(r=>[r.date,r.id,r.productLabel,r.sellerName,r.purchasePrice*(r.qty||1),r.amountPaid,r.due]); }
+  else if(sub==='expenses'){ headers=['Date','Expense ID','Category','Note','Amount']; rows = CACHE.expenses.map(r=>[r.date,r.id,r.category,r.note,r.amount]); }
+  else if(sub==='stock'){ headers=['Stock ID','Category','Condition','Status','Total Cost']; rows = CACHE.stock.map(r=>[r.id,r.category,r.condition,r.status,stockTotalCost(r)]); }
+  else if(sub==='banks'){ headers=['Date','Type','Mode','Bank','Amount']; rows = CACHE.ledger.map(r=>[r.date,r.type,r.mode,r.bankId?bankName(r.bankId):'',r.amount]); }
+  else { headers=['Note']; rows=[['No tabular export for this report — use Print instead.']]; }
+  const csv = [headers.join(','), ...rows.map(r=>r.map(v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`).join(','))].join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `ezr_${sub}_${todayISO()}.csv`; a.click();
+}
+
+/* ================= GLOBAL SEARCH ================= */
+function renderGlobalSearch(q){
+  const ql = q.toLowerCase();
+  const stockHits = CACHE.stock.filter(s=>s.id.toLowerCase().includes(ql) || (s.model||'').toLowerCase().includes(ql) || (s.serial||'').toLowerCase().includes(ql));
+  const custHits = CACHE.customers.filter(c=>c.name.toLowerCase().includes(ql) || (c.phone||'').includes(q));
+  const sellHits = CACHE.sellers.filter(c=>c.name.toLowerCase().includes(ql) || (c.phone||'').includes(q));
+  const saleHits = CACHE.sales.filter(s=>s.id.toLowerCase().includes(ql) || (s.buyerName||'').toLowerCase().includes(ql) || (s.billNo||'').toLowerCase().includes(ql));
+  return `
+    <div class="sec-head"><h3>Search results <span>for "${escapeHtml(q)}"</span></h3></div>
+    <div class="sec-head"><h3>Stock</h3></div>
+    ${tableOrEmpty(stockHits, ['Stock ID','Category','Item','Status'], r=>`<tr><td class="mono">${r.id}</td><td>${r.category}</td><td>${escapeHtml(r.model||r.accessoryType||'')}</td><td>${r.status}</td></tr>`)}
+    <div class="sec-head"><h3>Sales / Invoices</h3></div>
+    ${tableOrEmpty(saleHits, ['Invoice','Buyer','Item','Amount','Due'], r=>`<tr><td class="mono">${r.id}</td><td>${escapeHtml(r.buyerName)}</td><td>${escapeHtml(r.stockLabel||'')}</td><td class="mono">${inr(r.salePrice)}</td><td>${r.due>0?inr(r.due):'Paid'}</td></tr>`)}
+    <div class="sec-head"><h3>Buyers</h3></div>
+    ${tableOrEmpty(custHits, ['ID','Name','Phone'], r=>`<tr><td class="mono">${r.id}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.phone||'—')}</td></tr>`)}
+    <div class="sec-head"><h3>Sellers</h3></div>
+    ${tableOrEmpty(sellHits, ['ID','Name','Phone'], r=>`<tr><td class="mono">${r.id}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.phone||'—')}</td></tr>`)}
+  `;
+}
+
+/* ================= MODAL HELPERS ================= */
+function showModal(innerHtml){
+  let ov = document.getElementById('overlay');
+  if(!ov){ ov = document.createElement('div'); ov.id='overlay'; ov.className='overlay';
+    ov.addEventListener('click', e=>{ if(e.target===ov) closeModal(); }); document.body.appendChild(ov); }
+  ov.innerHTML = `<div class="modal">${innerHtml}</div>`; ov.style.display='flex';
+}
+function closeModal(){ const ov = document.getElementById('overlay'); if(ov) ov.style.display='none'; }
+
+/* ---------- Boot ---------- */
+initApp();
+</script>
+</body>
+</html>
