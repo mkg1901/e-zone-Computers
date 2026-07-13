@@ -120,14 +120,14 @@
    Fill these in from your Supabase project (Project Settings → API)
    before deploying. See SETUP-GUIDE.md for step-by-step instructions.
 ========================================================================= */
-const SUPABASE_URL = 'https://hybhdqtnyqfpbljvcmom.supabase.co';       // e.g. https://abcxyz.supabase.co
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh5YmhkcXRueXFmcGJsanZjbW9tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMxMTI0ODUsImV4cCI6MjA5ODY4ODQ4NX0.sdpCgXYn_Tzh_YWRRNgYE28TUwTpeTEwo1bX_r14OdQ';      // the "anon public" key
+const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';       // e.g. https://abcxyz.supabase.co
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';      // the "anon public" key
 
 /* ========================================================================= */
 
 let sb = null;
-let STATE = { tab:'dashboard', search:'', duesSubTab:'customer', reportSubTab:'quarterly', profile:null };
-let CACHE = { customers:[], sellers:[], banks:[], settings:{}, stock:[], purchases:[], sales:[], expenses:[], ledger:[] };
+let STATE = { tab:'dashboard', search:'', duesSubTab:'customer', reportSubTab:'quarterly', callLodgeSubTab:'open', profile:null };
+let CACHE = { customers:[], sellers:[], banks:[], settings:{}, stock:[], purchases:[], sales:[], expenses:[], ledger:[], accessoryTypes:[], callLodges:[] };
 let busy = false;
 
 /* ---------- Utilities ---------- */
@@ -139,6 +139,12 @@ const fmtDate = (iso)=>{ if(!iso) return '—'; const d=new Date(iso+'T00:00:00'
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function setBusy(v){ busy = v; const el = document.getElementById('savePill'); if(el) el.innerHTML = busy
   ? '<span class="led busy"></span> syncing…' : '<span class="led"></span> live'; }
+/* Blocks any date after today. Returns true (and alerts) if the date is invalid,
+   so callers can `if(blockIfFutureDate(date)){ return; }` right after reading the field. */
+function blockIfFutureDate(dateStr){
+  if(dateStr && dateStr > todayISO()){ alert('Future dates are not allowed. Please pick today or an earlier date.'); return true; }
+  return false;
+}
 
 /* ---------- Month & quarter helpers ---------- */
 function monthLabel(ym){ if(!ym) return '—'; const [y,m]=ym.split('-').map(Number); return new Date(y,m-1,1).toLocaleDateString('en-GB',{month:'long',year:'numeric'}); }
@@ -197,7 +203,7 @@ async function insertLedger({date,type,mode,bankId,amount,refType,refId,note}){
 }
 async function fetchAll(){
   setBusy(true);
-  const [customers, sellers, banks, settings, stock, mods, purchases, sales, expenses, ledger] = await Promise.all([
+  const [customers, sellers, banks, settings, stock, mods, purchases, sales, expenses, ledger, accTypes, callLodges] = await Promise.all([
     sb.from('customers').select('*').order('name'),
     sb.from('sellers').select('*').order('name'),
     sb.from('banks').select('*'),
@@ -208,6 +214,8 @@ async function fetchAll(){
     sb.from('sales').select('*').order('date',{ascending:false}),
     sb.from('expenses').select('*').order('date',{ascending:false}),
     sb.from('ledger').select('*').order('date',{ascending:false}),
+    sb.from('accessory_types').select('*').order('name'),
+    sb.from('call_lodges').select('*').order('date',{ascending:false}),
   ]);
   CACHE.customers = customers.data || [];
   CACHE.sellers = sellers.data || [];
@@ -231,6 +239,10 @@ async function fetchAll(){
     bankId:e.bank_id,date:e.date,note:e.note,createdByName:e.created_by_name}));
   CACHE.ledger = (ledger.data||[]).map(l=>({id:l.id,date:l.date,type:l.type,mode:l.mode,bankId:l.bank_id,amount:l.amount,
     refType:l.ref_type,refId:l.ref_id,note:l.note,createdByName:l.created_by_name}));
+  CACHE.accessoryTypes = (accTypes.data||[]).map(t=>t.name);
+  CACHE.callLodges = (callLodges.data||[]).map(c=>({id:c.id, date:c.date, category:c.category, customerId:c.customer_id,
+    customerName:c.customer_name, customerPhone:c.customer_phone, customerAddress:c.customer_address,
+    description:c.description, status:c.status, serviceNote:c.service_note, createdByName:c.created_by_name}));
   setBusy(false);
 }
 let realtimeChannel = null;
@@ -313,16 +325,18 @@ function render(){
 }
 const NAV = [
   {group:'Overview', items:[['dashboard','Dashboard']]},
-  {group:'Operations', items:[['transactions','Transactions'],['stock','Stock'],['sales','Sales'],['purchases','Purchases']]},
+  {group:'Operations', items:[['transactions','Transactions'],['stock','Stock'],['sales','Sales'],['purchases','Purchases'],['callLodge','Call Lodge']]},
   {group:'Accounts', items:[['dues','Dues'],['customers','Customers & Suppliers'],['banks','Payment Management'],['expenses','Expenses']]},
-  {group:'Insights', items:[['reports','Reports']]}
+  {group:'Insights', items:[['reports','Reports']]},
+  {group:'Admin', items:[['adminPanel','Admin Panel']]}
 ];
 function buildNav(){
   const nav = document.getElementById('nav'); let html = '';
   NAV.forEach(g=>{
+    const visibleItems = g.items.filter(([key])=> isAdmin() || !['banks','reports','adminPanel'].includes(key));
+    if(!visibleItems.length) return;
     html += `<div class="navgroup-label">${g.group}</div>`;
-    g.items.forEach(([key,label])=>{
-      if(!isAdmin() && (key==='banks' || key==='reports')) return;
+    visibleItems.forEach(([key,label])=>{
       html += `<div class="navitem ${STATE.tab===key?'active':''}" onclick="goTab('${key}')"><span class="dot"></span><span class="label">${label}</span></div>`;
     });
   });
@@ -333,9 +347,10 @@ function onSearch(v){ STATE.search=v; }
 function renderContent(){
   const c = document.getElementById('content'); const title = document.getElementById('pageTitle');
   const map = {dashboard:'Dashboard',transactions:'Transactions',stock:'Stock Management',sales:'Sales',purchases:'Purchases',
-    dues:'Dues',customers:'Customers & Suppliers',banks:'Payment Management',expenses:'Expense Management',reports:'Reports'};
+    callLodge:'Call Lodge', dues:'Dues',customers:'Customers & Suppliers',banks:'Payment Management',expenses:'Expense Management',
+    reports:'Reports', adminPanel:'Admin Panel'};
   title.textContent = map[STATE.tab] || '';
-  if((STATE.tab==='reports' || STATE.tab==='banks') && !isAdmin()){
+  if((STATE.tab==='reports' || STATE.tab==='banks' || STATE.tab==='adminPanel') && !isAdmin()){
     c.innerHTML = `<div class="tbl-wrap"><div class="empty">This section is visible to Admin accounts only.</div></div>`; return;
   }
   if(STATE.search && STATE.search.trim().length>0){ c.innerHTML = renderGlobalSearch(STATE.search.trim()); return; }
@@ -345,11 +360,13 @@ function renderContent(){
     case 'stock': c.innerHTML = renderStock(); break;
     case 'sales': c.innerHTML = renderSales(); break;
     case 'purchases': c.innerHTML = renderPurchases(); break;
+    case 'callLodge': c.innerHTML = renderCallLodge(); break;
     case 'dues': c.innerHTML = renderDues(); break;
     case 'customers': c.innerHTML = renderCustomers(); break;
     case 'banks': c.innerHTML = renderBanks(); break;
     case 'expenses': c.innerHTML = renderExpenses(); break;
     case 'reports': c.innerHTML = renderReports(); break;
+    case 'adminPanel': c.innerHTML = renderAdminPanel(); break;
   }
 }
 function tableOrEmpty(rows, headers, rowFn){
@@ -414,7 +431,7 @@ function openQuickTxModal(){
     <h3>Add Transaction</h3>
     <div class="modal-sub">Record a payment received or a spending/expense directly.</div>
     <div class="frow full"><div class="field"><label>Transaction Type</label><select id="tx_type"><option>Payment Received</option><option>Spending/Expense</option></select></div></div>
-    <div class="frow"><div class="field"><label>Date</label><input id="tx_date" type="date" value="${todayISO()}"></div>
+    <div class="frow"><div class="field"><label>Date</label><input id="tx_date" type="date" value="${todayISO()}" max="${todayISO()}"></div>
       <div class="field"><label>Amount (₹)</label><input id="tx_amount" type="number" min="0"></div></div>
     <div class="frow"><div class="field"><label>Payment Mode</label><select id="tx_mode" onchange="toggleBankField('tx')"><option>Cash</option><option>Online</option></select></div>
       <div class="field" id="tx_bankWrap" style="display:none;"><label>Bank</label><select id="tx_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
@@ -427,6 +444,7 @@ async function saveQuickTx(){
   const btn = document.getElementById('tx_save'); btn.disabled = true;
   const type = document.getElementById('tx_type').value;
   const date = document.getElementById('tx_date').value || todayISO();
+  if(blockIfFutureDate(date)){ btn.disabled=false; return; }
   const amount = Number(document.getElementById('tx_amount').value||0);
   const mode = document.getElementById('tx_mode').value;
   const bankId = mode==='Online' ? document.getElementById('tx_bank').value : '';
@@ -469,7 +487,7 @@ function openStockModal(){
       <div class="field"><label>Condition</label><select id="st_cond"><option>New</option><option>Old</option></select></div></div>
     <div id="st_fields"></div>
     <div class="frow"><div class="field"><label>Purchase Price (₹)</label><input id="st_price" type="number" min="0"></div>
-      <div class="field"><label>Purchase Date</label><input id="st_date" type="date" value="${todayISO()}"></div></div>
+      <div class="field"><label>Purchase Date</label><input id="st_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
     <div class="frow full"><div class="field"><label>Seller</label><select id="st_seller"><option value="">— select —</option>${CACHE.sellers.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="st_save" onclick="saveStock()">Save Item</button></div>
   `);
@@ -478,7 +496,8 @@ function openStockModal(){
 function toggleStockFields(){
   const cat = document.getElementById('st_cat').value; const wrap = document.getElementById('st_fields');
   if(cat==='Accessories'){
-    wrap.innerHTML = `<div class="frow"><div class="field"><label>Accessory Type</label><select id="st_accType"><option>Mouse</option><option>Keyboard</option><option>Charger</option><option>Adapter</option><option>RAM</option><option>SSD</option><option>HDD</option><option>Cable</option><option>Speaker</option><option>Others</option></select></div>
+    const options = CACHE.accessoryTypes.length ? CACHE.accessoryTypes : ['Others'];
+    wrap.innerHTML = `<div class="frow"><div class="field"><label>Accessory Type</label><select id="st_accType">${options.map(t=>`<option>${escapeHtml(t)}</option>`).join('')}</select></div>
       <div class="field"><label>Brand</label><input id="st_brand"></div></div>
       <div class="frow full"><div class="field"><label>Description</label><input id="st_desc"></div></div>`;
   } else {
@@ -494,6 +513,7 @@ async function saveStock(){
     const cat = document.getElementById('st_cat').value, cond = document.getElementById('st_cond').value;
     const price = Number(document.getElementById('st_price').value||0);
     const date = document.getElementById('st_date').value || todayISO();
+  if(blockIfFutureDate(date)){ btn.disabled=false; return; }
     const sellerId = document.getElementById('st_seller').value;
     const sellerNameVal = sellerId ? sellerName(sellerId) : '';
     let model='',processor='',ram='',gpu='',ssd='',hdd='',display='',serial='',accessoryType='',brand='',description='';
@@ -519,7 +539,7 @@ function openPartsModal(stockId){
     <h3>Add Parts / Modification</h3>
     <div class="modal-sub">${stockId} — ${escapeHtml(item.model||item.accessoryType||item.category)} · Current total cost: <b>${inr(stockTotalCost(item))}</b></div>
     <div class="frow full"><div class="field"><label>Part / Work Description</label><input id="pt_desc" placeholder="e.g. Added GTX 1650 4GB, new SMPS"></div></div>
-    <div class="frow"><div class="field"><label>Cost (₹)</label><input id="pt_cost" type="number" min="0"></div><div class="field"><label>Date</label><input id="pt_date" type="date" value="${todayISO()}"></div></div>
+    <div class="frow"><div class="field"><label>Cost (₹)</label><input id="pt_cost" type="number" min="0"></div><div class="field"><label>Date</label><input id="pt_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
     <div class="frow"><div class="field"><label>Payment Mode</label><select id="pt_mode" onchange="toggleBankField('pt')"><option>Cash</option><option>Online</option></select></div>
       <div class="field" id="pt_bankWrap" style="display:none;"><label>Bank</label><select id="pt_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
     ${(item.modifications||[]).length ? `<div class="note">Existing parts: ${item.modifications.map(m=>escapeHtml(m.description)+' ('+inr(m.cost)+')').join(', ')}</div>` : ''}
@@ -532,6 +552,7 @@ async function saveParts(stockId){
     const desc = document.getElementById('pt_desc').value.trim();
     const cost = Number(document.getElementById('pt_cost').value||0);
     const date = document.getElementById('pt_date').value || todayISO();
+  if(blockIfFutureDate(date)){ btn.disabled=false; return; }
     const mode = document.getElementById('pt_mode').value;
     const bankId = mode==='Online' ? document.getElementById('pt_bank').value : '';
     if(!desc){ alert('Enter a description.'); btn.disabled=false; return; }
@@ -569,7 +590,7 @@ function openSaleModal(){
       ${CACHE.customers.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}<option value="__new__">+ New buyer…</option></select></div>
       <div class="field" id="sl_newBuyerWrap" style="display:none;"><label>New Buyer Name</label><input id="sl_newBuyer"></div></div>
     <div class="frow"><div class="field"><label>Selling Price (₹)</label><input id="sl_price" type="number" min="0"></div>
-      <div class="field"><label>Date</label><input id="sl_date" type="date" value="${todayISO()}"></div></div>
+      <div class="field"><label>Date</label><input id="sl_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
     <div class="frow"><div class="field"><label>Payment Mode</label><select id="sl_mode" onchange="toggleBankField('sl')"><option>Cash</option><option>Online</option></select></div>
       <div class="field" id="sl_bankWrap" style="display:none;"><label>Bank</label><select id="sl_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
     <div class="frow full"><div class="field"><label>Amount Received (₹)</label><input id="sl_received" type="number" min="0"></div></div>
@@ -594,6 +615,7 @@ async function saveSale(){
     else { alert('Select a buyer.'); btn.disabled=false; return; }
     const price = Number(document.getElementById('sl_price').value||0);
     const date = document.getElementById('sl_date').value || todayISO();
+  if(blockIfFutureDate(date)){ btn.disabled=false; return; }
     const mode = document.getElementById('sl_mode').value;
     const bankId = mode==='Online' ? document.getElementById('sl_bank').value : '';
     const received = Number(document.getElementById('sl_received').value||0);
@@ -639,7 +661,7 @@ function openPurchaseModal(){
     <div class="frow"><div class="field"><label>Payment Mode</label><select id="pu_mode" onchange="toggleBankField('pu')"><option>Cash</option><option>Online</option></select></div>
       <div class="field" id="pu_bankWrap" style="display:none;"><label>Bank</label><select id="pu_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
     <div class="frow"><div class="field"><label>Amount Paid (₹)</label><input id="pu_paid" type="number" min="0"></div>
-      <div class="field"><label>Date</label><input id="pu_date" type="date" value="${todayISO()}"></div></div>
+      <div class="field"><label>Date</label><input id="pu_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="pu_save" onclick="savePurchase()">Save Purchase</button></div>
   `);
   document.getElementById('pu_seller').addEventListener('change', e=>{ document.getElementById('pu_newSellerWrap').style.display = e.target.value==='__new__'?'block':'none'; });
@@ -664,6 +686,7 @@ async function savePurchase(){
     const bankId = mode==='Online' ? document.getElementById('pu_bank').value : '';
     const paid = Number(document.getElementById('pu_paid').value||0);
     const date = document.getElementById('pu_date').value || todayISO();
+  if(blockIfFutureDate(date)){ btn.disabled=false; return; }
     const due = Math.max(0, (price*qty)-paid);
     const stockId = await genId('stock_seq','EZR',4);
     await sb.from('stock').insert({id:stockId, category:cat, condition:'Old', status:'In Stock', purchase_price:price, purchase_date:date,
@@ -674,6 +697,112 @@ async function savePurchase(){
       purchase_price:price, qty, date, payment_mode:mode, bank_id:bankId||null, amount_paid:paid, due,
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
     if(paid>0) await insertLedger({date, type:'Purchase', mode:mode==='Online'?'Bank':'Cash', bankId, amount:-paid, refType:'purchase', refId:purchaseId, note:'Purchase '+purchaseId});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
+/* ================= CALL LODGE ================= */
+function renderCallLodge(){
+  const sub = STATE.callLodgeSubTab;
+  const open = CACHE.callLodges.filter(c=>c.status==='Open').sort((a,b)=>b.date.localeCompare(a.date));
+  const closed = CACHE.callLodges.filter(c=>c.status==='Closed').sort((a,b)=>b.date.localeCompare(a.date));
+  const rows = sub==='open' ? open : closed;
+  return `
+    <div class="tabbar">
+      <div class="tabbtn ${sub==='open'?'active':''}" onclick="setCallLodgeTab('open')">Open (${open.length})</div>
+      <div class="tabbtn ${sub==='closed'?'active':''}" onclick="setCallLodgeTab('closed')">Closed (${closed.length})</div>
+    </div>
+    <div class="sec-head"><h3>Call Lodge</h3><button class="btn" onclick="openCallLodgeModal()">+ New Call Lodge</button></div>
+    ${tableOrEmpty(rows, ['Date','ID','Category','Customer','Phone','Details','Status','Service Note','By','Action'], r=>`
+      <tr><td>${fmtDate(r.date)}</td><td class="mono">${r.id}</td>
+      <td><span class="pill ${r.category==='Service Request'?'amber':'gray'}">${r.category}</span></td>
+      <td>${escapeHtml(r.customerName||'—')}</td><td>${escapeHtml(r.customerPhone||'—')}</td>
+      <td>${escapeHtml(r.description||'—')}</td>
+      <td>${r.status==='Closed'?'<span class="pill green">Closed</span>':'<span class="pill amber">Open</span>'}</td>
+      <td>${escapeHtml(r.serviceNote||'—')}</td><td>${escapeHtml(r.createdByName||'—')}</td>
+      <td>${r.status==='Open'?`<button class="btn small" onclick="openCallLodgeNoteModal('${r.id}')">Add Note / Close</button>`:'—'}</td></tr>`)}
+    <div class="note">A Call Lodge cannot be marked Closed until a Service Note is entered.</div>
+  `;
+}
+function setCallLodgeTab(t){ STATE.callLodgeSubTab=t; renderContent(); }
+function openCallLodgeModal(){
+  showModal(`
+    <h3>New Call Lodge</h3>
+    <div class="frow full"><div class="field"><label>Request Category</label><select id="cl_category">
+      <option>Service Request</option><option>Purchase Request</option></select></div></div>
+    <div class="frow full"><div class="field"><label>Customer</label><select id="cl_customer" onchange="onCallLodgeCustomerChange()">
+      <option value="">— select existing customer —</option>
+      ${CACHE.customers.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+      <option value="__new__">+ New customer…</option></select></div></div>
+    <div id="cl_customerDetails"></div>
+    <div class="frow"><div class="field"><label>Date</label><input id="cl_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
+    <div class="frow full"><div class="field"><label>Issue / Request Details</label><textarea id="cl_desc" rows="3" placeholder="What does the customer need?"></textarea></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="cl_save" onclick="saveCallLodge()">Save Call Lodge</button></div>
+  `);
+  onCallLodgeCustomerChange();
+}
+function onCallLodgeCustomerChange(){
+  const sel = document.getElementById('cl_customer').value;
+  const wrap = document.getElementById('cl_customerDetails');
+  if(sel==='__new__'){
+    wrap.innerHTML = `<div class="frow full"><div class="field"><label>New Customer Name</label><input id="cl_newName"></div></div>
+      <div class="frow"><div class="field"><label>Phone</label><input id="cl_newPhone"></div><div class="field"><label>Address</label><input id="cl_newAddr"></div></div>`;
+  } else if(sel){
+    const c = CACHE.customers.find(x=>x.id===sel);
+    wrap.innerHTML = `<div class="frow"><div class="field"><label>Phone</label><input value="${escapeHtml(c&&c.phone||'—')}" disabled></div>
+      <div class="field"><label>Address</label><input value="${escapeHtml(c&&c.address||'—')}" disabled></div></div>`;
+  } else { wrap.innerHTML = ''; }
+}
+async function saveCallLodge(){
+  const btn = document.getElementById('cl_save'); btn.disabled = true;
+  try{
+    const category = document.getElementById('cl_category').value;
+    const date = document.getElementById('cl_date').value || todayISO();
+    if(blockIfFutureDate(date)){ btn.disabled=false; return; }
+    const desc = document.getElementById('cl_desc').value.trim();
+    let sel = document.getElementById('cl_customer').value, customerId=null, customerName_='', customerPhone='', customerAddress='';
+    if(sel==='__new__'){
+      const name = document.getElementById('cl_newName').value.trim();
+      if(!name){ alert('Enter the new customer name.'); btn.disabled=false; return; }
+      customerPhone = document.getElementById('cl_newPhone').value.trim();
+      customerAddress = document.getElementById('cl_newAddr').value.trim();
+      customerId = await genId('customer_seq','CUS',4);
+      await sb.from('customers').insert({id:customerId, name, phone:customerPhone, address:customerAddress});
+      customerName_ = name;
+    } else if(sel){
+      const c = CACHE.customers.find(x=>x.id===sel);
+      customerId = sel; customerName_ = c.name; customerPhone = c.phone||''; customerAddress = c.address||'';
+    } else { alert('Select a customer from the database, or add a new one.'); btn.disabled=false; return; }
+    const id = await genId('call_lodge_seq','CL',4);
+    await sb.from('call_lodges').insert({id, date, category, customer_id:customerId, customer_name:customerName_,
+      customer_phone:customerPhone, customer_address:customerAddress, description:desc, status:'Open', service_note:'',
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+function openCallLodgeNoteModal(id){
+  const rec = CACHE.callLodges.find(c=>c.id===id);
+  showModal(`
+    <h3>Service Note — ${id}</h3>
+    <div class="modal-sub">${escapeHtml(rec.customerName)} · ${escapeHtml(rec.category)}</div>
+    <div class="frow full"><div class="field"><label>Service Note</label><textarea id="cln_note" rows="4" placeholder="What was done / found">${escapeHtml(rec.serviceNote||'')}</textarea></div></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn ghost" id="cln_saveonly" onclick="saveCallLodgeNote('${id}', false)">Save Note</button>
+      <button class="btn" id="cln_close" onclick="saveCallLodgeNote('${id}', true)">Mark as Closed</button>
+    </div>
+  `);
+}
+async function saveCallLodgeNote(id, closeAfter){
+  const note = document.getElementById('cln_note').value.trim();
+  if(closeAfter && !note){
+    alert('A Service Note is required before a Call Lodge can be marked Closed.');
+    return;
+  }
+  const btn = closeAfter ? document.getElementById('cln_close') : document.getElementById('cln_saveonly');
+  btn.disabled = true;
+  try{
+    await sb.from('call_lodges').update({ service_note: note, status: closeAfter ? 'Closed' : 'Open' }).eq('id', id);
     await fetchAll(); closeModal(); render();
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
 }
@@ -713,7 +842,7 @@ function openDuePayModal(refType, refId){
     <h3>${isSale?'Receive Payment':'Pay Seller'}</h3>
     <div class="modal-sub">${isSale?escapeHtml(rec.buyerName):escapeHtml(rec.sellerName)} · Outstanding: <b style="color:var(--amber)">${inr(rec.due)}</b></div>
     <div class="frow"><div class="field"><label>Amount (₹)</label><input id="dp_amount" type="number" min="0" max="${rec.due}" value="${rec.due}"></div>
-      <div class="field"><label>Date</label><input id="dp_date" type="date" value="${todayISO()}"></div></div>
+      <div class="field"><label>Date</label><input id="dp_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
     <div class="frow"><div class="field"><label>Mode</label><select id="dp_mode" onchange="toggleBankField('dp')"><option>Cash</option><option>Online</option></select></div>
       <div class="field" id="dp_bankWrap" style="display:none;"><label>Bank</label><select id="dp_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="dp_save" onclick="saveDuePayment('${refType}','${refId}')">Confirm</button></div>
@@ -724,6 +853,7 @@ async function saveDuePayment(refType, refId){
   try{
     const amount = Number(document.getElementById('dp_amount').value||0);
     const date = document.getElementById('dp_date').value || todayISO();
+  if(blockIfFutureDate(date)){ btn.disabled=false; return; }
     const mode = document.getElementById('dp_mode').value;
     const bankId = mode==='Online' ? document.getElementById('dp_bank').value : '';
     if(amount<=0){ alert('Enter a valid amount.'); btn.disabled=false; return; }
@@ -880,7 +1010,7 @@ function openExpenseModal(){
       <div class="field"><label>Amount (₹)</label><input id="ex_amount" type="number" min="0"></div></div>
     <div class="frow"><div class="field"><label>Payment Mode</label><select id="ex_mode" onchange="toggleBankField('ex')"><option>Cash</option><option>Online</option></select></div>
       <div class="field" id="ex_bankWrap" style="display:none;"><label>Bank</label><select id="ex_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
-    <div class="frow"><div class="field"><label>Date</label><input id="ex_date" type="date" value="${todayISO()}"></div><div class="field"><label>Note</label><input id="ex_note"></div></div>
+    <div class="frow"><div class="field"><label>Date</label><input id="ex_date" type="date" value="${todayISO()}" max="${todayISO()}"></div><div class="field"><label>Note</label><input id="ex_note"></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="ex_save" onclick="saveExpense()">Save Expense</button></div>
   `);
 }
@@ -893,6 +1023,7 @@ async function saveExpense(){
     const mode = document.getElementById('ex_mode').value;
     const bankId = mode==='Online' ? document.getElementById('ex_bank').value : '';
     const date = document.getElementById('ex_date').value || todayISO();
+  if(blockIfFutureDate(date)){ btn.disabled=false; return; }
     const note = document.getElementById('ex_note').value;
     const id = await genId('expense_seq','EXP',4);
     await sb.from('expenses').insert({id, category, amount, payment_mode:mode, bank_id:bankId||null, date, note,
@@ -1014,6 +1145,42 @@ function exportCSV(sub){
   const csv = [headers.join(','), ...rows.map(r=>r.map(v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`).join(','))].join('\n');
   const blob = new Blob([csv], {type:'text/csv'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `ezr_${sub}_${todayISO()}.csv`; a.click();
+}
+
+/* ================= ADMIN PANEL (Admin only) ================= */
+function renderAdminPanel(){
+  return `
+    <div class="note">Accessory Types managed here control the dropdown regular users see when adding an Accessory to Stock — staff cannot type in a custom type.</div>
+    <div class="sec-head"><h3>Accessory Types</h3><button class="btn" onclick="openAddAccessoryTypeModal()">+ Add Type</button></div>
+    ${tableOrEmpty(CACHE.accessoryTypes, ['Type Name',''], t=>`
+      <tr><td>${escapeHtml(t)}</td><td><a class="link" onclick="deleteAccessoryType('${escapeHtml(t).replace(/'/g,"\\'")}')">Delete</a></td></tr>`)}
+  `;
+}
+function openAddAccessoryTypeModal(){
+  showModal(`
+    <h3>Add Accessory Type</h3>
+    <div class="frow full"><div class="field"><label>Type Name</label><input id="at_name" placeholder="e.g. Webcam"></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="at_save" onclick="saveAccessoryType()">Save</button></div>
+  `);
+}
+async function saveAccessoryType(){
+  const btn = document.getElementById('at_save'); btn.disabled = true;
+  try{
+    const name = document.getElementById('at_name').value.trim();
+    if(!name){ alert('Enter a type name.'); btn.disabled=false; return; }
+    const { error } = await sb.from('accessory_types').insert({ name });
+    if(error){
+      if(error.message && error.message.toLowerCase().includes('duplicate')) alert('That accessory type already exists.');
+      else alert('Save failed: '+error.message);
+      btn.disabled = false; return;
+    }
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+async function deleteAccessoryType(name){
+  if(!confirm(`Delete accessory type "${name}"? Stock items already using it keep their existing value; it just won't appear as an option for new items.`)) return;
+  try{ await sb.from('accessory_types').delete().eq('name', name); await fetchAll(); render(); }
+  catch(e){ alert('Delete failed: '+e.message); }
 }
 
 /* ================= GLOBAL SEARCH ================= */
