@@ -187,6 +187,11 @@ function sellerName(id){ const s=CACHE.sellers.find(x=>x.id===id); return s?s.na
 function customerName(id){ const c=CACHE.customers.find(x=>x.id===id); return c?c.name:'—'; }
 function bankName(id){ const b=CACHE.banks.find(x=>x.id===id); return b?b.name:'—'; }
 function isAdmin(){ return STATE.profile && STATE.profile.role==='Admin'; }
+function stockItemLabel(r){
+  if(r.category==='Accessories') return (r.accessoryType||'')+' — '+(r.description||r.brand||'');
+  const parts = [r.model, r.processor, r.ram, r.ssd, r.hdd, r.gpu, r.display].filter(Boolean);
+  return parts.length ? parts.join(' / ') : (r.model || '—');
+}
 
 /* ---------- Supabase data layer ---------- */
 async function genId(seqName, prefix, padLen){
@@ -493,7 +498,7 @@ function renderStock(){
     ${tableOrEmpty(items, ['Stock ID','Date of Purchase','Category','Condition','Item','Purchase ₹','Parts Added ₹','Total Cost ₹','Seller','Status','Action'], r=>{
       const modsCost = (r.modifications||[]).reduce((s,m)=>s+Number(m.cost||0),0);
       return `<tr><td class="mono">${r.id}</td><td>${fmtDate(r.purchaseDate)}</td><td>${r.category}</td><td>${r.condition}</td>
-      <td>${escapeHtml(r.category==='Accessories' ? (r.accessoryType+' — '+(r.description||r.brand||'')) : (r.model||'—'))}</td>
+      <td>${escapeHtml(stockItemLabel(r))}</td>
       <td class="mono">${inr(r.purchasePrice)}</td><td class="mono">${modsCost>0?inr(modsCost):'—'}</td>
       <td class="mono">${inr(stockTotalCost(r))}</td><td>${escapeHtml(r.sellerName||'—')}</td>
       <td>${r.status==='Sold'?'<span class="pill gray">Sold</span>':'<span class="pill green">In Stock</span>'}</td>
