@@ -490,9 +490,9 @@ function renderStock(){
   return `
     <div class="sec-head"><h3>Stock <span>${items.length} items · ${totalStockInStock()} in stock</span></h3>
       <button class="btn" onclick="openStockModal()">+ Add Stock Item</button></div>
-    ${tableOrEmpty(items, ['Stock ID','Category','Condition','Item','Purchase ₹','Parts Added ₹','Total Cost ₹','Seller','Status','Action'], r=>{
+    ${tableOrEmpty(items, ['Stock ID','Date of Purchase','Category','Condition','Item','Purchase ₹','Parts Added ₹','Total Cost ₹','Seller','Status','Action'], r=>{
       const modsCost = (r.modifications||[]).reduce((s,m)=>s+Number(m.cost||0),0);
-      return `<tr><td class="mono">${r.id}</td><td>${r.category}</td><td>${r.condition}</td>
+      return `<tr><td class="mono">${r.id}</td><td>${fmtDate(r.purchaseDate)}</td><td>${r.category}</td><td>${r.condition}</td>
       <td>${escapeHtml(r.category==='Accessories' ? (r.accessoryType+' — '+(r.description||r.brand||'')) : (r.model||'—'))}</td>
       <td class="mono">${inr(r.purchasePrice)}</td><td class="mono">${modsCost>0?inr(modsCost):'—'}</td>
       <td class="mono">${inr(stockTotalCost(r))}</td><td>${escapeHtml(r.sellerName||'—')}</td>
