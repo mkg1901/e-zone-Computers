@@ -189,6 +189,21 @@ function bankName(id){ const b=CACHE.banks.find(x=>x.id===id); return b?b.name:'
 function isAdmin(){ return STATE.profile && STATE.profile.role==='Admin'; }
 /* ---------- Structured part add/remove helpers ---------- */
 const PART_FIELD_MAP = { Processor:'processor', Motherboard:'motherboard', RAM:'ram', GPU:'gpu', SSD:'ssd', HDD:'hdd', Display:'display' };
+/* Maps an Accessory's admin-managed type name (which might be worded differently, e.g.
+   "Graphics Card" or "Monitor") onto the structured spec field it represents, if any. */
+const ACCESSORY_TYPE_SYNONYMS = {
+  processor:'Processor', cpu:'Processor',
+  motherboard:'Motherboard', mobo:'Motherboard', mainboard:'Motherboard',
+  ram:'RAM', memory:'RAM',
+  gpu:'GPU', 'graphics card':'GPU', 'graphic card':'GPU', 'video card':'GPU',
+  ssd:'SSD',
+  hdd:'HDD', 'hard disk':'HDD', 'hard drive':'HDD',
+  display:'Display', monitor:'Display', screen:'Display'
+};
+function matchAccessoryToPartType(accessoryType){
+  if(!accessoryType) return null;
+  return ACCESSORY_TYPE_SYNONYMS[String(accessoryType).trim().toLowerCase()] || null;
+}
 const QUANTITY_PARTS = ['RAM','SSD','HDD']; // measured in GB/TB, amounts add/subtract
 const SINGULAR_PARTS = ['Processor','Motherboard','GPU','Display']; // one-of-a-kind, add replaces / remove blanks
 function partFieldKind(partType){
@@ -673,7 +688,7 @@ function openPartsModal(stockId){
     </select></div></div>
     <div class="frow"><div class="field"><label>Cost (₹)</label><input id="pt_cost" type="number" min="0"></div>
       <div class="field"><label>Date</label><input id="pt_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
-    <div class="note">Cost is prefilled from the accessory's price — you can adjust it if needed. This is an internal transfer (no cash movement logged). Multiple accessories can be added one at a time.</div>
+    <div class="note">Cost is prefilled from the accessory's price — you can adjust it if needed. This is an internal transfer (no cash movement logged). If the accessory is a Processor, Motherboard, GPU, or Display, it updates that field in the configuration directly — and a laptop/desktop can only have one of each. RAM/SSD/HDD accessories add to the existing amount. Multiple accessories can be added one at a time.</div>
     ${(item.modifications||[]).filter(m=>m.type!=='Removed' && !m.fieldKey).length ? `<div class="note">Accessories added so far: ${item.modifications.filter(m=>m.type!=='Removed' && !m.fieldKey).map(m=>escapeHtml(m.description)+' ('+inr(m.cost)+')').join(', ')}</div>` : ''}
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="pt_save" onclick="saveParts('${stockId}')">Add to Stock Item</button></div>
     ` : `
@@ -714,7 +729,29 @@ async function saveParts(stockId){
     const accDesc = (accessory.accessoryType||'')+' — '+(accessory.description||accessory.brand||'');
     const desc = accDesc+' ('+accessoryId+')';
 
-    await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost, date, mode:'', bank_id:null, type:'Added', field_key:null,
+    // If this accessory's type matches a structured spec field (Processor/Motherboard/RAM/GPU/SSD/HDD/Display),
+    // update the laptop/desktop's actual configuration — not just cost/notes.
+    const matchedType = matchAccessoryToPartType(accessory.accessoryType);
+    let fieldKey = null, fieldUpdate = null;
+    if(matchedType){
+      fieldKey = PART_FIELD_MAP[matchedType];
+      const kind = partFieldKind(matchedType);
+      if(kind==='singular'){
+        if(item[fieldKey]){ alert('This item already has a '+matchedType+' ('+item[fieldKey]+'). Remove it first before adding another — a laptop or desktop can only have one.'); btn.disabled=false; return; }
+        fieldUpdate = accessory.description || accessory.brand || accDesc;
+      } else if(kind==='quantity'){
+        const parsed = parseAmountGB(accessory.description);
+        if(parsed){
+          const current = parseAmountGB(item[fieldKey]) || { gb:0, suffix:parsed.suffix };
+          fieldUpdate = formatAmountGB(current.gb + parsed.gb, parsed.suffix || current.suffix);
+        } else {
+          fieldKey = null; // couldn't read a usable amount from the accessory's description — fall back to cost/notes only
+        }
+      }
+    }
+
+    if(fieldKey){ await sb.from('stock').update({ [fieldKey]: fieldUpdate }).eq('id', stockId); }
+    await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost, date, mode:'', bank_id:null, type:'Added', field_key:fieldKey,
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
 
     const parentNotes = (item.notes ? item.notes+'\n' : '') + 'Accessory added: '+accessoryId+' — '+accDesc;
