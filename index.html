@@ -174,7 +174,7 @@ function ymToQuarterKey(ym){ const [y,m]=ym.split('-').map(Number); return y+'-Q
 function quarterLabel(qKey){ const [y,q]=qKey.split('-Q'); const r={1:'Jan–Mar',2:'Apr–Jun',3:'Jul–Sep',4:'Oct–Dec'}; return `${r[q]} ${y} (Q${q})`; }
 
 /* ---------- Derived values ---------- */
-function stockTotalCost(s){ if(!s) return 0; const mods=(s.modifications||[]).reduce((sum,m)=> sum + (m.type==='Removed' ? -Number(m.cost||0) : Number(m.cost||0)), 0); return Number(s.purchasePrice||0)+mods; }
+function stockTotalCost(s){ if(!s) return 0; const addedCost=(s.modifications||[]).filter(m=>m.type!=='Removed').reduce((sum,m)=>sum+Number(m.cost||0),0); return Number(s.purchasePrice||0)+addedCost; }
 function saleGrossProfit(sale){ const st = CACHE.stock.find(x=>x.id===sale.stockId); return st ? Number(sale.salePrice||0)-stockTotalCost(st) : null; }
 function cashOpening(){ return Number(CACHE.settings.cash_opening||0); }
 function cashBalance(){ return cashOpening() + CACHE.ledger.filter(l=>l.mode==='Cash').reduce((s,l)=>s+Number(l.amount),0); }
@@ -188,9 +188,9 @@ function customerName(id){ const c=CACHE.customers.find(x=>x.id===id); return c?
 function bankName(id){ const b=CACHE.banks.find(x=>x.id===id); return b?b.name:'—'; }
 function isAdmin(){ return STATE.profile && STATE.profile.role==='Admin'; }
 /* ---------- Structured part add/remove helpers ---------- */
-const PART_FIELD_MAP = { Processor:'processor', RAM:'ram', GPU:'gpu', SSD:'ssd', HDD:'hdd', Display:'display' };
+const PART_FIELD_MAP = { Processor:'processor', Motherboard:'motherboard', RAM:'ram', GPU:'gpu', SSD:'ssd', HDD:'hdd', Display:'display' };
 const QUANTITY_PARTS = ['RAM','SSD','HDD']; // measured in GB/TB, amounts add/subtract
-const SINGULAR_PARTS = ['Processor','GPU','Display']; // one-of-a-kind, add replaces / remove blanks
+const SINGULAR_PARTS = ['Processor','Motherboard','GPU','Display']; // one-of-a-kind, add replaces / remove blanks
 function partFieldKind(partType){
   if(QUANTITY_PARTS.includes(partType)) return 'quantity';
   if(SINGULAR_PARTS.includes(partType)) return 'singular';
@@ -223,22 +223,35 @@ function formatAmountGB(gb, suffix){
   return suffix ? out+' '+suffix : out;
 }
 
-function stockItemLabel(r){
+function stockItemLabel(r, multiline){
   let base;
-  if(r.category==='Accessories') base = (r.accessoryType||'')+' — '+(r.description||r.brand||'');
-  else {
-    const specParts = [];
-    if(r.processor) specParts.push('processor - '+r.processor);
-    if(r.ram) specParts.push('ram - '+r.ram);
-    if(r.ssd) specParts.push('ssd - '+r.ssd);
-    if(r.hdd) specParts.push('hdd - '+r.hdd);
-    if(r.gpu) specParts.push('graphics card - '+r.gpu);
-    if(r.display) specParts.push('display - '+r.display);
-    const specString = specParts.join(', ');
-    base = r.model ? (specString ? r.model+' — '+specString : r.model) : (specString || '—');
+  if(r.category==='Accessories'){
+    base = multiline
+      ? escapeHtml(r.accessoryType||'')+' — '+escapeHtml(r.description||r.brand||'')
+      : (r.accessoryType||'')+' — '+(r.description||r.brand||'');
+  } else {
+    const specs = [];
+    if(r.processor) specs.push(['Processor', r.processor]);
+    if(r.motherboard) specs.push(['Motherboard', r.motherboard]);
+    if(r.ram) specs.push(['RAM', r.ram]);
+    if(r.ssd) specs.push(['SSD', r.ssd]);
+    if(r.hdd) specs.push(['HDD', r.hdd]);
+    if(r.gpu) specs.push(['Graphics Card', r.gpu]);
+    if(r.display) specs.push(['Display', r.display]);
+    if(multiline){
+      const lines = specs.map(([label,val])=> `${escapeHtml(label)} - ${escapeHtml(val)}`);
+      const modelLine = r.model ? `<b>${escapeHtml(r.model)}</b>` : '';
+      base = [modelLine, ...lines].filter(Boolean).join('<br>') || '—';
+    } else {
+      const specString = specs.map(([label,val])=>label+' - '+val).join(', ');
+      base = r.model ? (specString ? r.model+' — '+specString : r.model) : (specString || '—');
+    }
   }
   const mods = (r.modifications||[]).filter(m=>m.type!=='Removed' && !m.fieldKey).map(m=>m.description).filter(Boolean);
-  if(mods.length) base += ' + ' + mods.join(', ');
+  if(mods.length){
+    if(multiline) base += '<br>' + mods.map(m=>escapeHtml(m)).join('<br>');
+    else base += ' + ' + mods.join(', ');
+  }
   return base;
 }
 
@@ -277,7 +290,7 @@ async function fetchAll(){
   CACHE.settings = {}; (settings.data||[]).forEach(s=>CACHE.settings[s.key]=s.value);
   const modsList = mods.data || [];
   CACHE.stock = (stock.data||[]).map(s=>({
-    id:s.id, category:s.category, condition:s.condition, status:s.status, model:s.model, processor:s.processor,
+    id:s.id, category:s.category, condition:s.condition, status:s.status, model:s.model, processor:s.processor, motherboard:s.motherboard,
     ram:s.ram, gpu:s.gpu, ssd:s.ssd, hdd:s.hdd, display:s.display, serial:s.serial, accessoryType:s.accessory_type,
     brand:s.brand, description:s.description, purchasePrice:s.purchase_price, purchaseDate:s.purchase_date,
     sellerId:s.seller_id, sellerName:s.seller_name, notes:s.notes, createdByName:s.created_by_name,
@@ -544,17 +557,36 @@ function renderStock(){
   return `
     <div class="sec-head"><h3>Stock <span>${items.length} items · ${totalStockInStock()} in stock</span></h3>
       <button class="btn" onclick="openStockModal()">+ Add Stock Item</button></div>
-    ${tableOrEmpty(items, ['Stock ID','Date of Purchase','Category','Condition','Item','Purchase ₹','Parts Net ₹','Total Cost ₹','Seller','Status','Action'], r=>{
-      const modsNet = (r.modifications||[]).reduce((s,m)=> s + (m.type==='Removed' ? -Number(m.cost||0) : Number(m.cost||0)), 0);
+    ${tableOrEmpty(items, ['Stock ID','Date of Purchase','Category','Condition','Item','Purchase ₹','Parts Added ₹','Total Cost ₹','Seller','Status','Action'], r=>{
+      const addedCost = (r.modifications||[]).filter(m=>m.type!=='Removed').reduce((s,m)=>s+Number(m.cost||0),0);
       return `<tr><td class="mono">${r.id}</td><td>${fmtDate(r.purchaseDate)}</td><td>${r.category}</td><td>${r.condition}</td>
-      <td>${escapeHtml(stockItemLabel(r))}</td>
-      <td class="mono">${inr(r.purchasePrice)}</td><td class="mono" style="color:${modsNet<0?'var(--red)':'inherit'}">${modsNet!==0?(modsNet<0?'-':'+')+inr(Math.abs(modsNet)):'—'}</td>
+      <td>${stockItemLabel(r, true)}
+        ${r.notes ? `<div class="note" style="margin:6px 0 0 0;padding:6px 8px;font-size:11px;">${escapeHtml(r.notes)}</div>` : ''}
+        <div style="margin-top:6px;"><a class="link" onclick="openStockNotesModal('${r.id}')">${r.notes ? 'Edit Note' : '+ Add Note'}</a></div></td>
+      <td class="mono">${inr(r.purchasePrice)}</td><td class="mono">${addedCost>0?inr(addedCost):'—'}</td>
       <td class="mono">${inr(stockTotalCost(r))}</td><td>${escapeHtml(r.sellerName||'—')}</td>
       <td>${r.status==='Sold'?'<span class="pill gray">Sold</span>':'<span class="pill green">In Stock</span>'}</td>
       <td>${r.status==='In Stock'?`<a class="link" onclick="openPartsModal('${r.id}')">+ Add Parts</a>${r.category!=='Accessories'?` &nbsp;<a class="link" style="color:var(--red)" onclick="openRemovePartModal('${r.id}')">− Remove Part</a>`:''}`:'—'}</td></tr>`;
     })}
-    <div class="note">Use <b>+ Add Parts</b> when modifying/upgrading a desktop/laptop before reselling — cost is added to Total Cost. Use <b>− Remove Part</b> to take a component out (e.g. pull a working HDD before selling the machine) — you set its value, that value is subtracted from this item's Total Cost, and a new Accessories stock item is created for the removed part automatically.</div>
+    <div class="note">Use <b>+ Add Parts</b> when modifying/upgrading a desktop/laptop before reselling — cost is added to Total Cost. Use <b>− Remove Part</b> to take a component out — the price you assign is subtracted directly from this item's Purchase Price, and a new Accessories stock item is created for the removed part automatically.</div>
   `;
+}
+function openStockNotesModal(stockId){
+  const item = CACHE.stock.find(s=>s.id===stockId);
+  showModal(`
+    <h3>${item.notes ? 'Edit' : 'Add'} Note — ${stockId}</h3>
+    <div class="modal-sub">${escapeHtml(item.model||item.accessoryType||item.category)}</div>
+    <div class="frow full"><div class="field"><label>Note</label><textarea id="sn_note" rows="4" placeholder="Any extra info about this item">${escapeHtml(item.notes||'')}</textarea></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="sn_save" onclick="saveStockNotes('${stockId}')">Save Note</button></div>
+  `);
+}
+async function saveStockNotes(stockId){
+  const btn = document.getElementById('sn_save'); btn.disabled = true;
+  try{
+    const note = document.getElementById('sn_note').value.trim();
+    await sb.from('stock').update({ notes: note }).eq('id', stockId);
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
 }
 function openStockModal(){
   showModal(`
@@ -578,10 +610,11 @@ function toggleStockFields(){
       <div class="frow full"><div class="field"><label>Description</label><input id="st_desc"></div></div>`;
   } else {
     wrap.innerHTML = `<div class="frow"><div class="field"><label>Model</label><input id="st_model"></div><div class="field"><label>Processor</label><input id="st_proc"></div></div>
-      <div class="frow"><div class="field"><label>RAM</label><input id="st_ram"></div><div class="field"><label>Graphics Card</label><input id="st_gpu"></div></div>
+      <div class="frow"><div class="field"><label>Motherboard</label><input id="st_motherboard"></div><div class="field"><label>RAM</label><input id="st_ram"></div></div>
       <div class="frow"><div class="field"><label>SSD</label><div style="display:flex;gap:6px;"><input id="st_ssd_val" type="number" min="0" step="any" placeholder="e.g. 256" style="flex:1;"><select id="st_ssd_unit" style="width:74px;"><option>GB</option><option>TB</option></select></div></div>
       <div class="field"><label>HDD</label><div style="display:flex;gap:6px;"><input id="st_hdd_val" type="number" min="0" step="any" placeholder="e.g. 1" style="flex:1;"><select id="st_hdd_unit" style="width:74px;"><option>GB</option><option>TB</option></select></div></div></div>
-      <div class="frow"><div class="field"><label>Display Size</label><input id="st_display"></div><div class="field"><label>Serial Number</label><input id="st_serial"></div></div>`;
+      <div class="frow"><div class="field"><label>Graphics Card</label><input id="st_gpu"></div><div class="field"><label>Display Size</label><input id="st_display"></div></div>
+      <div class="frow full"><div class="field"><label>Serial Number</label><input id="st_serial"></div></div>`;
   }
 }
 async function saveStock(){
@@ -593,16 +626,16 @@ async function saveStock(){
   if(blockIfFutureDate(date)){ btn.disabled=false; return; }
     const sellerId = document.getElementById('st_seller').value;
     const sellerNameVal = sellerId ? sellerName(sellerId) : '';
-    let model='',processor='',ram='',gpu='',ssd='',hdd='',display='',serial='',accessoryType='',brand='',description='';
+    let model='',processor='',motherboard='',ram='',gpu='',ssd='',hdd='',display='',serial='',accessoryType='',brand='',description='';
     if(cat==='Accessories'){ accessoryType=document.getElementById('st_accType').value; brand=document.getElementById('st_brand').value; description=document.getElementById('st_desc').value; }
-    else { model=document.getElementById('st_model').value; processor=document.getElementById('st_proc').value; ram=document.getElementById('st_ram').value;
+    else { model=document.getElementById('st_model').value; processor=document.getElementById('st_proc').value; motherboard=document.getElementById('st_motherboard').value; ram=document.getElementById('st_ram').value;
       gpu=document.getElementById('st_gpu').value;
       const ssdVal=document.getElementById('st_ssd_val').value, ssdUnit=document.getElementById('st_ssd_unit').value;
       const hddVal=document.getElementById('st_hdd_val').value, hddUnit=document.getElementById('st_hdd_unit').value;
       ssd = ssdVal ? ssdVal+ssdUnit : ''; hdd = hddVal ? hddVal+hddUnit : '';
       display=document.getElementById('st_display').value; serial=document.getElementById('st_serial').value; }
     const id = await genId('stock_seq','EZR',4);
-    await sb.from('stock').insert({id, category:cat, condition:cond, status:'In Stock', model, processor, ram, gpu, ssd, hdd, display, serial,
+    await sb.from('stock').insert({id, category:cat, condition:cond, status:'In Stock', model, processor, motherboard, ram, gpu, ssd, hdd, display, serial,
       accessory_type:accessoryType, brand, description, purchase_price:price, purchase_date:date, seller_id:sellerId||null, seller_name:sellerNameVal,
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
     const purchaseId = await genId('purchase_seq','PUR',4);
@@ -619,7 +652,7 @@ function openPartsModal(stockId){
     <h3>Add Parts / Modification</h3>
     <div class="modal-sub">${stockId} — ${escapeHtml(item.model||item.accessoryType||item.category)} · Current total cost: <b>${inr(stockTotalCost(item))}</b></div>
     <div class="frow full"><div class="field"><label>Part Type</label><select id="pt_type" onchange="togglePartAddFields()">
-      <option>Processor</option><option>RAM</option><option>GPU</option><option>SSD</option><option>HDD</option><option>Display</option><option>Other</option></select></div></div>
+      <option>Processor</option><option>Motherboard</option><option>RAM</option><option>GPU</option><option>SSD</option><option>HDD</option><option>Display</option><option>Other</option></select></div></div>
     <div id="pt_valueWrap"></div>
     <div class="frow"><div class="field"><label>Cost (₹)</label><input id="pt_cost" type="number" min="0"></div><div class="field"><label>Date</label><input id="pt_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
     <div class="frow"><div class="field"><label>Payment Mode</label><select id="pt_mode" onchange="toggleBankField('pt')"><option>Cash</option><option>Online</option></select></div>
@@ -704,9 +737,9 @@ function openRemovePartModal(stockId){
   showModal(`
     <h3>Remove Part</h3>
     <div class="modal-sub">${stockId} — ${escapeHtml(item.model||item.category)} · Current total cost: <b>${inr(stockTotalCost(item))}</b></div>
-    <div class="note">The price you enter is subtracted from this item's Total Cost, and a new Accessories stock item is created automatically for the removed part, ready to sell separately.</div>
+    <div class="note">The price you enter is subtracted directly from this item's Purchase Price (cannot exceed its current price), and a new Accessories stock item is created automatically for the removed part, ready to sell separately.</div>
     <div class="frow full"><div class="field"><label>Part Type</label><select id="rp_type" onchange="toggleRemovePartFields('${stockId}')">
-      <option>Processor</option><option>RAM</option><option>GPU</option><option>SSD</option><option>HDD</option><option>Display</option><option>Other</option></select></div></div>
+      <option>Processor</option><option>Motherboard</option><option>RAM</option><option>GPU</option><option>SSD</option><option>HDD</option><option>Display</option><option>Other</option></select></div></div>
     <div id="rp_valueWrap"></div>
     <div class="frow"><div class="field"><label>Price to assign (₹)</label><input id="rp_price" type="number" min="0"></div>
       <div class="field"><label>Date</label><input id="rp_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
@@ -746,6 +779,7 @@ async function saveRemovePart(stockId){
     if(blockIfFutureDate(date)){ btn.disabled=false; return; }
     if(price<=0){ alert('Enter a valid price for the removed part.'); btn.disabled=false; return; }
     const item = CACHE.stock.find(s=>s.id===stockId);
+    if(price > Number(item.purchasePrice||0)){ alert('Assigned price cannot be more than the current price of this item (' + inr(item.purchasePrice) + ').'); btn.disabled=false; return; }
     let desc = '', fieldKey = null, fieldUpdate = null, accessoryDesc = '';
 
     if(kind==='quantity'){
@@ -774,7 +808,10 @@ async function saveRemovePart(stockId){
       accessoryDesc = val;
     }
 
-    if(fieldKey){ await sb.from('stock').update({ [fieldKey]: fieldUpdate }).eq('id', stockId); }
+    const newPurchasePrice = Number(item.purchasePrice||0) - price;
+    const stockUpdate = { purchase_price: newPurchasePrice };
+    if(fieldKey) stockUpdate[fieldKey] = fieldUpdate;
+    await sb.from('stock').update(stockUpdate).eq('id', stockId);
     await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost:price, date, mode:'', bank_id:null, type:'Removed', field_key:fieldKey,
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
     const newId = await genId('stock_seq','EZR',4);
