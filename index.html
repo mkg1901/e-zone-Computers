@@ -126,7 +126,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 /* ========================================================================= */
 
 let sb = null;
-let STATE = { tab:'dashboard', search:'', duesSubTab:'customer', reportSubTab:'quarterly', callLodgeSubTab:'open', profile:null };
+let STATE = { tab:'dashboard', search:'', duesSubTab:'customer', reportSubTab:'quarterly', callLodgeSubTab:'open', stockSubTab:'active', profile:null };
 let CACHE = { customers:[], sellers:[], banks:[], settings:{}, stock:[], purchases:[], sales:[], expenses:[], ledger:[], accessoryTypes:[], callLodges:[] };
 let busy = false;
 
@@ -174,7 +174,7 @@ function ymToQuarterKey(ym){ const [y,m]=ym.split('-').map(Number); return y+'-Q
 function quarterLabel(qKey){ const [y,q]=qKey.split('-Q'); const r={1:'Jan–Mar',2:'Apr–Jun',3:'Jul–Sep',4:'Oct–Dec'}; return `${r[q]} ${y} (Q${q})`; }
 
 /* ---------- Derived values ---------- */
-function stockTotalCost(s){ if(!s) return 0; const addedCost=(s.modifications||[]).filter(m=>m.type!=='Removed').reduce((sum,m)=>sum+Number(m.cost||0),0); return Number(s.purchasePrice||0)+addedCost; }
+function stockTotalCost(s){ if(!s) return 0; const mods=(s.modifications||[]).reduce((sum,m)=> sum + (m.type==='Removed' ? -Number(m.cost||0) : Number(m.cost||0)), 0); return Number(s.purchasePrice||0)+mods; }
 function saleGrossProfit(sale){ const st = CACHE.stock.find(x=>x.id===sale.stockId); return st ? Number(sale.salePrice||0)-stockTotalCost(st) : null; }
 function cashOpening(){ return Number(CACHE.settings.cash_opening||0); }
 function cashBalance(){ return cashOpening() + CACHE.ledger.filter(l=>l.mode==='Cash').reduce((s,l)=>s+Number(l.amount),0); }
@@ -553,24 +553,37 @@ async function saveQuickTx(){
 
 /* ================= STOCK ================= */
 function renderStock(){
-  const items = [...CACHE.stock].sort((a,b)=>b.id.localeCompare(a.id));
+  const sub = STATE.stockSubTab || 'active';
+  const active = CACHE.stock.filter(s=>s.status!=='Sold').sort((a,b)=>b.id.localeCompare(a.id));
+  const sold = CACHE.stock.filter(s=>s.status==='Sold').sort((a,b)=>b.id.localeCompare(a.id));
+  const items = sub==='sold' ? sold : active;
   return `
-    <div class="sec-head"><h3>Stock <span>${items.length} items · ${totalStockInStock()} in stock</span></h3>
+    <div class="tabbar">
+      <div class="tabbtn ${sub==='active'?'active':''}" onclick="setStockTab('active')">In Stock (${active.length})</div>
+      <div class="tabbtn ${sub==='sold'?'active':''}" onclick="setStockTab('sold')">Sold Stock (${sold.length})</div>
+    </div>
+    <div class="sec-head"><h3>Stock <span>${totalStockInStock()} available now</span></h3>
       <button class="btn" onclick="openStockModal()">+ Add Stock Item</button></div>
-    ${tableOrEmpty(items, ['Stock ID','Date of Purchase','Category','Condition','Item','Purchase ₹','Parts Added ₹','Total Cost ₹','Seller','Status','Action'], r=>{
-      const addedCost = (r.modifications||[]).filter(m=>m.type!=='Removed').reduce((s,m)=>s+Number(m.cost||0),0);
+    ${tableOrEmpty(items, ['Stock ID','Date of Purchase','Category','Condition','Item','Purchase ₹','Parts Net ₹','Total Cost ₹','Seller','Status','Action'], r=>{
+      const modsNet = (r.modifications||[]).reduce((s,m)=> s + (m.type==='Removed' ? -Number(m.cost||0) : Number(m.cost||0)), 0);
+      const statusPill = r.status==='Sold' ? '<span class="pill gray">Sold</span>'
+        : r.status==='Blocked' ? '<span class="pill amber">Blocked</span>'
+        : '<span class="pill green">In Stock</span>';
+      const canAddParts = r.status==='In Stock' && r.category!=='Accessories';
+      const canRemoveParts = r.status==='In Stock' && r.category!=='Accessories';
       return `<tr><td class="mono">${r.id}</td><td>${fmtDate(r.purchaseDate)}</td><td>${r.category}</td><td>${r.condition}</td>
       <td>${stockItemLabel(r, true)}
         ${r.notes ? `<div class="note" style="margin:6px 0 0 0;padding:6px 8px;font-size:11px;">${escapeHtml(r.notes)}</div>` : ''}
         <div style="margin-top:6px;"><a class="link" onclick="openStockNotesModal('${r.id}')">${r.notes ? 'Edit Note' : '+ Add Note'}</a></div></td>
-      <td class="mono">${inr(r.purchasePrice)}</td><td class="mono">${addedCost>0?inr(addedCost):'—'}</td>
+      <td class="mono">${inr(r.purchasePrice)}</td><td class="mono" style="color:${modsNet<0?'var(--red)':'inherit'}">${modsNet!==0?(modsNet<0?'-':'+')+inr(Math.abs(modsNet)):'—'}</td>
       <td class="mono">${inr(stockTotalCost(r))}</td><td>${escapeHtml(r.sellerName||'—')}</td>
-      <td>${r.status==='Sold'?'<span class="pill gray">Sold</span>':'<span class="pill green">In Stock</span>'}</td>
-      <td>${r.status==='In Stock'?`<a class="link" onclick="openPartsModal('${r.id}')">+ Add Parts</a>${r.category!=='Accessories'?` &nbsp;<a class="link" style="color:var(--red)" onclick="openRemovePartModal('${r.id}')">− Remove Part</a>`:''}`:'—'}</td></tr>`;
+      <td>${statusPill}</td>
+      <td>${canAddParts?`<a class="link" onclick="openPartsModal('${r.id}')">+ Add Parts</a>`:''}${canRemoveParts?` &nbsp;<a class="link" style="color:var(--red)" onclick="openRemovePartModal('${r.id}')">− Remove Part</a>`:''}${!canAddParts && !canRemoveParts?'—':''}</td></tr>`;
     })}
-    <div class="note">Use <b>+ Add Parts</b> when modifying/upgrading a desktop/laptop before reselling — cost is added to Total Cost. Use <b>− Remove Part</b> to take a component out — the price you assign is subtracted directly from this item's Purchase Price, and a new Accessories stock item is created for the removed part automatically.</div>
+    <div class="note">Use <b>+ Add Parts</b> to attach an in-stock Accessory into a laptop/desktop (cost is added to Total Cost; the accessory becomes Blocked and can't be sold on its own). Use <b>− Remove Part</b> to take a component out — its value is subtracted from Total Cost (Purchase Price never changes), and a new Accessories item is created automatically. Selling a laptop/desktop automatically marks its Blocked accessories as Sold too.</div>
   `;
 }
+function setStockTab(t){ STATE.stockSubTab=t; renderContent(); }
 function openStockNotesModal(stockId){
   const item = CACHE.stock.find(s=>s.id===stockId);
   showModal(`
@@ -596,7 +609,7 @@ function openStockModal(){
     <div id="st_fields"></div>
     <div class="frow"><div class="field"><label>Purchase Price (₹)</label><input id="st_price" type="number" min="0"></div>
       <div class="field"><label>Purchase Date</label><input id="st_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
-    <div class="frow full"><div class="field"><label>Seller</label><select id="st_seller"><option value="">— select —</option>${CACHE.sellers.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select></div></div>
+    <div class="frow full"><div class="field"><label>Seller (required)</label><select id="st_seller"><option value="">— select —</option>${CACHE.sellers.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="st_save" onclick="saveStock()">Save Item</button></div>
   `);
   toggleStockFields();
@@ -625,7 +638,8 @@ async function saveStock(){
     const date = document.getElementById('st_date').value || todayISO();
   if(blockIfFutureDate(date)){ btn.disabled=false; return; }
     const sellerId = document.getElementById('st_seller').value;
-    const sellerNameVal = sellerId ? sellerName(sellerId) : '';
+    if(!sellerId){ alert('Seller is required.'); btn.disabled=false; return; }
+    const sellerNameVal = sellerName(sellerId);
     let model='',processor='',motherboard='',ram='',gpu='',ssd='',hdd='',display='',serial='',accessoryType='',brand='',description='';
     if(cat==='Accessories'){ accessoryType=document.getElementById('st_accType').value; brand=document.getElementById('st_brand').value; description=document.getElementById('st_desc').value; }
     else { model=document.getElementById('st_model').value; processor=document.getElementById('st_proc').value; motherboard=document.getElementById('st_motherboard').value; ram=document.getElementById('st_ram').value;
@@ -648,39 +662,28 @@ async function saveStock(){
 }
 function openPartsModal(stockId){
   const item = CACHE.stock.find(s=>s.id===stockId);
+  const available = CACHE.stock.filter(s=>s.category==='Accessories' && s.status==='In Stock');
   showModal(`
-    <h3>Add Parts / Modification</h3>
-    <div class="modal-sub">${stockId} — ${escapeHtml(item.model||item.accessoryType||item.category)} · Current total cost: <b>${inr(stockTotalCost(item))}</b></div>
-    <div class="frow full"><div class="field"><label>Part Type</label><select id="pt_type" onchange="togglePartAddFields()">
-      <option>Processor</option><option>Motherboard</option><option>RAM</option><option>GPU</option><option>SSD</option><option>HDD</option><option>Display</option><option>Other</option></select></div></div>
-    <div id="pt_valueWrap"></div>
-    <div class="frow"><div class="field"><label>Cost (₹)</label><input id="pt_cost" type="number" min="0"></div><div class="field"><label>Date</label><input id="pt_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
-    <div class="frow"><div class="field"><label>Payment Mode</label><select id="pt_mode" onchange="toggleBankField('pt')"><option>Cash</option><option>Online</option></select></div>
-      <div class="field" id="pt_bankWrap" style="display:none;"><label>Bank</label><select id="pt_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
-    ${(item.modifications||[]).filter(m=>m.type!=='Removed' && !m.fieldKey).length ? `<div class="note">Other parts added so far: ${item.modifications.filter(m=>m.type!=='Removed' && !m.fieldKey).map(m=>escapeHtml(m.description)+' ('+inr(m.cost)+')').join(', ')}</div>` : ''}
+    <h3>Add Parts (from Accessories in Stock)</h3>
+    <div class="modal-sub">${stockId} — ${escapeHtml(item.model||item.category)} · Current total cost: <b>${inr(stockTotalCost(item))}</b></div>
+    ${available.length ? `
+    <div class="frow full"><div class="field"><label>Accessory</label><select id="pt_accessory" onchange="onPartsAccessoryChange()">
+      <option value="">— select an in-stock accessory —</option>
+      ${available.map(a=>`<option value="${a.id}" data-price="${a.purchasePrice}">${a.id} — ${escapeHtml((a.accessoryType||'')+' — '+(a.description||a.brand||''))} (${inr(a.purchasePrice)})</option>`).join('')}
+    </select></div></div>
+    <div class="frow"><div class="field"><label>Cost (₹)</label><input id="pt_cost" type="number" min="0"></div>
+      <div class="field"><label>Date</label><input id="pt_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
+    <div class="note">Cost is prefilled from the accessory's price — you can adjust it if needed. This is an internal transfer (no cash movement logged). Multiple accessories can be added one at a time.</div>
+    ${(item.modifications||[]).filter(m=>m.type!=='Removed' && !m.fieldKey).length ? `<div class="note">Accessories added so far: ${item.modifications.filter(m=>m.type!=='Removed' && !m.fieldKey).map(m=>escapeHtml(m.description)+' ('+inr(m.cost)+')').join(', ')}</div>` : ''}
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="pt_save" onclick="saveParts('${stockId}')">Add to Stock Item</button></div>
+    ` : `
+    <div class="note" style="color:var(--amber);">No Accessories are currently In Stock to add. Add an accessory to Stock first (Category: Accessories), then come back here.</div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>
+    `}
   `);
-  togglePartAddFields();
-}
-function togglePartAddFields(){
-  const partType = document.getElementById('pt_type').value;
-  const kind = partFieldKind(partType);
-  const wrap = document.getElementById('pt_valueWrap');
-  if(kind==='quantity'){
-    if(partType==='SSD' || partType==='HDD'){
-      wrap.innerHTML = `<div class="frow"><div class="field"><label>Amount to add</label><input id="pt_amount_val" type="number" min="0" step="any" placeholder="e.g. 256"></div>
-        <div class="field"><label>Unit</label><select id="pt_amount_unit"><option>GB</option><option>TB</option></select></div></div>`;
-    } else {
-      wrap.innerHTML = `<div class="frow full"><div class="field"><label>Amount to add</label><input id="pt_amount" placeholder="e.g. 4GB or 1TB"></div></div>`;
-    }
-  } else if(kind==='singular'){
-    wrap.innerHTML = `<div class="frow full"><div class="field"><label>New ${partType} (replaces existing)</label><input id="pt_value" placeholder="e.g. Ryzen 5 5600X"></div></div>`;
-  } else {
-    wrap.innerHTML = `<div class="frow full"><div class="field"><label>Value / Description</label><input id="pt_desc_other" placeholder="describe the part / work done"></div></div>`;
-  }
 }
 /* Reads the "amount" input regardless of whether it's the plain text field (RAM) or the
-   number+unit pair (SSD/HDD), returning a combined string like "256GB" either way. */
+   number+unit pair (SSD/HDD), returning a combined string like "256GB" either way. Used by Remove Part. */
 function readPartAmountString(prefix, partType){
   if(partType==='SSD' || partType==='HDD'){
     const val = document.getElementById(prefix+'_amount_val').value;
@@ -689,46 +692,35 @@ function readPartAmountString(prefix, partType){
   }
   return document.getElementById(prefix+'_amount').value.trim();
 }
+function onPartsAccessoryChange(){
+  const sel = document.getElementById('pt_accessory');
+  const opt = sel.options[sel.selectedIndex];
+  const price = opt ? opt.getAttribute('data-price') : '';
+  const costField = document.getElementById('pt_cost');
+  if(costField) costField.value = price || '';
+}
 async function saveParts(stockId){
   const btn = document.getElementById('pt_save'); btn.disabled = true;
   try{
-    const partType = document.getElementById('pt_type').value;
-    const kind = partFieldKind(partType);
+    const accessoryId = document.getElementById('pt_accessory').value;
+    if(!accessoryId){ alert('Select an accessory to add.'); btn.disabled=false; return; }
     const cost = Number(document.getElementById('pt_cost').value||0);
     const date = document.getElementById('pt_date').value || todayISO();
     if(blockIfFutureDate(date)){ btn.disabled=false; return; }
-    const mode = document.getElementById('pt_mode').value;
-    const bankId = mode==='Online' ? document.getElementById('pt_bank').value : '';
     if(cost<=0){ alert('Enter a valid cost.'); btn.disabled=false; return; }
+    const accessory = CACHE.stock.find(s=>s.id===accessoryId);
+    if(!accessory || accessory.status!=='In Stock'){ alert('That accessory is no longer available in stock — someone else may have used it. Refresh and try again.'); btn.disabled=false; return; }
     const item = CACHE.stock.find(s=>s.id===stockId);
-    let desc = '', fieldKey = null, fieldUpdate = null;
+    const accDesc = (accessory.accessoryType||'')+' — '+(accessory.description||accessory.brand||'');
+    const desc = accDesc+' ('+accessoryId+')';
 
-    if(kind==='quantity'){
-      const amtStr = readPartAmountString('pt', partType);
-      const parsed = parseAmountGB(amtStr);
-      if(!parsed){ alert('Enter a valid amount like "4GB" or "1TB".'); btn.disabled=false; return; }
-      fieldKey = PART_FIELD_MAP[partType];
-      const current = parseAmountGB(item[fieldKey]) || { gb:0, suffix:parsed.suffix };
-      const newValue = formatAmountGB(current.gb + parsed.gb, parsed.suffix || current.suffix);
-      fieldUpdate = newValue;
-      desc = partType+': +'+formatAmountGB(parsed.gb, parsed.suffix)+' (now '+(newValue||'0')+')';
-    } else if(kind==='singular'){
-      const val = document.getElementById('pt_value').value.trim();
-      if(!val){ alert('Enter the new '+partType+' value.'); btn.disabled=false; return; }
-      fieldKey = PART_FIELD_MAP[partType];
-      if(item[fieldKey]){ alert('This item already has a '+partType+' ('+item[fieldKey]+'). Remove it first before adding a new one — a laptop or desktop can only have one.'); btn.disabled=false; return; }
-      fieldUpdate = val;
-      desc = partType+': '+val;
-    } else {
-      const val = document.getElementById('pt_desc_other').value.trim();
-      if(!val){ alert('Enter a description.'); btn.disabled=false; return; }
-      desc = val;
-    }
-
-    if(fieldKey){ await sb.from('stock').update({ [fieldKey]: fieldUpdate }).eq('id', stockId); }
-    await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost, date, mode, bank_id:bankId||null, type:'Added', field_key:fieldKey,
+    await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost, date, mode:'', bank_id:null, type:'Added', field_key:null,
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
-    await insertLedger({date, type:'Modification/Parts', mode, bankId, amount:-cost, refType:'stock', refId:stockId, note:'Parts for '+stockId+': '+desc});
+
+    const parentNotes = (item.notes ? item.notes+'\n' : '') + 'Accessory added: '+accessoryId+' — '+accDesc;
+    await sb.from('stock').update({ notes: parentNotes }).eq('id', stockId);
+    await sb.from('stock').update({ status:'Blocked', blocked_for: stockId, notes: 'Added to '+stockId }).eq('id', accessoryId);
+
     await fetchAll(); closeModal(); render();
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
 }
@@ -737,7 +729,7 @@ function openRemovePartModal(stockId){
   showModal(`
     <h3>Remove Part</h3>
     <div class="modal-sub">${stockId} — ${escapeHtml(item.model||item.category)} · Current total cost: <b>${inr(stockTotalCost(item))}</b></div>
-    <div class="note">The price you enter is subtracted directly from this item's Purchase Price (cannot exceed its current price), and a new Accessories stock item is created automatically for the removed part, ready to sell separately.</div>
+    <div class="note">The price you enter is subtracted from this item's Total Cost (Purchase Price itself never changes), and a new Accessories stock item is created automatically for the removed part, ready to sell separately.</div>
     <div class="frow full"><div class="field"><label>Part Type</label><select id="rp_type" onchange="toggleRemovePartFields('${stockId}')">
       <option>Processor</option><option>Motherboard</option><option>RAM</option><option>GPU</option><option>SSD</option><option>HDD</option><option>Display</option><option>Other</option></select></div></div>
     <div id="rp_valueWrap"></div>
@@ -779,7 +771,7 @@ async function saveRemovePart(stockId){
     if(blockIfFutureDate(date)){ btn.disabled=false; return; }
     if(price<=0){ alert('Enter a valid price for the removed part.'); btn.disabled=false; return; }
     const item = CACHE.stock.find(s=>s.id===stockId);
-    if(price > Number(item.purchasePrice||0)){ alert('Assigned price cannot be more than the current price of this item (' + inr(item.purchasePrice) + ').'); btn.disabled=false; return; }
+    if(price > stockTotalCost(item)){ alert('Assigned price cannot be more than the current Total Cost of this item (' + inr(stockTotalCost(item)) + ').'); btn.disabled=false; return; }
     let desc = '', fieldKey = null, fieldUpdate = null, accessoryDesc = '';
 
     if(kind==='quantity'){
@@ -808,10 +800,7 @@ async function saveRemovePart(stockId){
       accessoryDesc = val;
     }
 
-    const newPurchasePrice = Number(item.purchasePrice||0) - price;
-    const stockUpdate = { purchase_price: newPurchasePrice };
-    if(fieldKey) stockUpdate[fieldKey] = fieldUpdate;
-    await sb.from('stock').update(stockUpdate).eq('id', stockId);
+    if(fieldKey){ await sb.from('stock').update({ [fieldKey]: fieldUpdate }).eq('id', stockId); }
     await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost:price, date, mode:'', bank_id:null, type:'Removed', field_key:fieldKey,
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
     const newId = await genId('stock_seq','EZR',4);
@@ -884,6 +873,7 @@ async function saveSale(){
       sale_price:price, date, payment_mode:mode, bank_id:bankId||null, amount_received:received, due,
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
     await sb.from('stock').update({status:'Sold'}).eq('id', stockId);
+    await sb.from('stock').update({status:'Sold'}).eq('blocked_for', stockId);
     if(received>0) await insertLedger({date, type:'Sale', mode:mode==='Online'?'Bank':'Cash', bankId, amount:received, refType:'sale', refId:invoiceId, note:'Sale '+invoiceId+' — '+stockId});
     await fetchAll(); closeModal(); render();
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
