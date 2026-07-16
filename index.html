@@ -139,6 +139,13 @@ const fmtDate = (iso)=>{ if(!iso) return '—'; const d=new Date(iso+'T00:00:00'
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function setBusy(v){ busy = v; const el = document.getElementById('savePill'); if(el) el.innerHTML = busy
   ? '<span class="led busy"></span> syncing…' : '<span class="led"></span> live'; }
+/* Supabase does NOT throw on a database error (e.g. a column missing because a migration
+   wasn't run) — it just returns {error:...}. Every mutation must be checked with this,
+   or a failed save can look like it worked while nothing was actually saved. */
+function throwIfDbError(result, context){
+  if(result && result.error){ throw new Error((context ? context+': ' : '') + result.error.message); }
+  return result;
+}
 /* Blocks any date after today. Returns true (and alerts) if the date is invalid,
    so callers can `if(blockIfFutureDate(date)){ return; }` right after reading the field. */
 function blockIfFutureDate(dateStr){
@@ -579,8 +586,7 @@ function renderStock(){
     </div>
     <div class="sec-head"><h3>Stock <span>${totalStockInStock()} available now</span></h3>
       <button class="btn" onclick="openStockModal()">+ Add Stock Item</button></div>
-    ${tableOrEmpty(items, ['Stock ID','Date of Purchase','Category','Condition','Item','Purchase ₹','Parts Net ₹','Total Cost ₹','Seller','Status','Action'], r=>{
-      const modsNet = (r.modifications||[]).reduce((s,m)=> s + (m.type==='Removed' ? -Number(m.cost||0) : Number(m.cost||0)), 0);
+    ${tableOrEmpty(items, ['Stock ID','Date of Purchase','Category','Condition','Item','Purchase ₹','Total Cost ₹','Seller','Status','Action'], r=>{
       const statusPill = r.status==='Sold' ? '<span class="pill gray">Sold</span>'
         : r.status==='Blocked' ? '<span class="pill amber">Blocked</span>'
         : '<span class="pill green">In Stock</span>';
@@ -590,7 +596,7 @@ function renderStock(){
       <td>${stockItemLabel(r, true)}
         ${r.notes ? `<div class="note" style="margin:6px 0 0 0;padding:6px 8px;font-size:11px;">${escapeHtml(r.notes)}</div>` : ''}
         <div style="margin-top:6px;"><a class="link" onclick="openStockNotesModal('${r.id}')">${r.notes ? 'Edit Note' : '+ Add Note'}</a></div></td>
-      <td class="mono">${inr(r.purchasePrice)}</td><td class="mono" style="color:${modsNet<0?'var(--red)':'inherit'}">${modsNet!==0?(modsNet<0?'-':'+')+inr(Math.abs(modsNet)):'—'}</td>
+      <td class="mono">${inr(r.purchasePrice)}</td>
       <td class="mono">${inr(stockTotalCost(r))}</td><td>${escapeHtml(r.sellerName||'—')}</td>
       <td>${statusPill}</td>
       <td>${canAddParts?`<a class="link" onclick="openPartsModal('${r.id}')">+ Add Parts</a>`:''}${canRemoveParts?` &nbsp;<a class="link" style="color:var(--red)" onclick="openRemovePartModal('${r.id}')">− Remove Part</a>`:''}${!canAddParts && !canRemoveParts?'—':''}</td></tr>`;
@@ -664,13 +670,13 @@ async function saveStock(){
       ssd = ssdVal ? ssdVal+ssdUnit : ''; hdd = hddVal ? hddVal+hddUnit : '';
       display=document.getElementById('st_display').value; serial=document.getElementById('st_serial').value; }
     const id = await genId('stock_seq','EZR',4);
-    await sb.from('stock').insert({id, category:cat, condition:cond, status:'In Stock', model, processor, motherboard, ram, gpu, ssd, hdd, display, serial,
+    throwIfDbError(await sb.from('stock').insert({id, category:cat, condition:cond, status:'In Stock', model, processor, motherboard, ram, gpu, ssd, hdd, display, serial,
       accessory_type:accessoryType, brand, description, purchase_price:price, purchase_date:date, seller_id:sellerId||null, seller_name:sellerNameVal,
-      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName}), 'Creating stock item');
     const purchaseId = await genId('purchase_seq','PUR',4);
-    await sb.from('purchases').insert({id:purchaseId, stock_id:id, seller_id:sellerId||null, seller_name:sellerNameVal,
+    throwIfDbError(await sb.from('purchases').insert({id:purchaseId, stock_id:id, seller_id:sellerId||null, seller_name:sellerNameVal,
       product_label: cat==='Accessories'?accessoryType:model, purchase_price:price, qty:1, date, payment_mode:'Cash', amount_paid:price, due:0,
-      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName}), 'Creating purchase record');
     await insertLedger({date, type:'Purchase', mode:'Cash', bankId:'', amount:-price, refType:'stock', refId:id, note:'Stock purchase: '+id});
     await fetchAll(); closeModal(); render();
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
@@ -750,13 +756,13 @@ async function saveParts(stockId){
       }
     }
 
-    if(fieldKey){ await sb.from('stock').update({ [fieldKey]: fieldUpdate }).eq('id', stockId); }
-    await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost, date, mode:'', bank_id:null, type:'Added', field_key:fieldKey,
-      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    if(fieldKey){ throwIfDbError(await sb.from('stock').update({ [fieldKey]: fieldUpdate }).eq('id', stockId), 'Updating configuration'); }
+    throwIfDbError(await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost, date, mode:'', bank_id:null, type:'Added', field_key:fieldKey,
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName}), 'Recording cost');
 
     const parentNotes = (item.notes ? item.notes+'\n' : '') + 'Accessory added: '+accessoryId+' — '+accDesc;
-    await sb.from('stock').update({ notes: parentNotes }).eq('id', stockId);
-    await sb.from('stock').update({ status:'Blocked', blocked_for: stockId, notes: 'Added to '+stockId }).eq('id', accessoryId);
+    throwIfDbError(await sb.from('stock').update({ notes: parentNotes }).eq('id', stockId), 'Updating notes');
+    throwIfDbError(await sb.from('stock').update({ status:'Blocked', blocked_for: stockId, notes: 'Added to '+stockId }).eq('id', accessoryId), 'Blocking accessory');
 
     await fetchAll(); closeModal(); render();
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
@@ -837,13 +843,13 @@ async function saveRemovePart(stockId){
       accessoryDesc = val;
     }
 
-    if(fieldKey){ await sb.from('stock').update({ [fieldKey]: fieldUpdate }).eq('id', stockId); }
-    await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost:price, date, mode:'', bank_id:null, type:'Removed', field_key:fieldKey,
-      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+    if(fieldKey){ throwIfDbError(await sb.from('stock').update({ [fieldKey]: fieldUpdate }).eq('id', stockId), 'Updating configuration'); }
+    throwIfDbError(await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost:price, date, mode:'', bank_id:null, type:'Removed', field_key:fieldKey,
+      created_by:STATE.profile.id, created_by_name:STATE.profile.fullName}), 'Recording removal');
     const newId = await genId('stock_seq','EZR',4);
-    await sb.from('stock').insert({id:newId, category:'Accessories', condition:'Old', status:'In Stock',
+    throwIfDbError(await sb.from('stock').insert({id:newId, category:'Accessories', condition:'Old', status:'In Stock',
       accessory_type: kind==='other' ? 'Others' : partType, description:accessoryDesc+' ('+stockId+')', purchase_price:price, purchase_date:date,
-      notes:'Removed from '+stockId, created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
+      notes:'Removed from '+stockId, created_by:STATE.profile.id, created_by_name:STATE.profile.fullName}), 'Creating removed-part stock item');
     await fetchAll(); closeModal(); render();
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
 }
@@ -909,8 +915,8 @@ async function saveSale(){
     await sb.from('sales').insert({id:invoiceId, bill_no:invoiceId, stock_id:stockId, stock_label:stockLabel, buyer_id:buyerId, buyer_name:buyerNameVal,
       sale_price:price, date, payment_mode:mode, bank_id:bankId||null, amount_received:received, due,
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
-    await sb.from('stock').update({status:'Sold'}).eq('id', stockId);
-    await sb.from('stock').update({status:'Sold'}).eq('blocked_for', stockId);
+    throwIfDbError(await sb.from('stock').update({status:'Sold'}).eq('id', stockId), 'Marking item Sold');
+    throwIfDbError(await sb.from('stock').update({status:'Sold'}).eq('blocked_for', stockId), 'Marking blocked accessories Sold');
     if(received>0) await insertLedger({date, type:'Sale', mode:mode==='Online'?'Bank':'Cash', bankId, amount:received, refType:'sale', refId:invoiceId, note:'Sale '+invoiceId+' — '+stockId});
     await fetchAll(); closeModal(); render();
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
