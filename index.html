@@ -196,16 +196,25 @@ function partFieldKind(partType){
   if(SINGULAR_PARTS.includes(partType)) return 'singular';
   return 'other';
 }
-/* Parses "8GB", "1.5 TB", "512gb DDR4" etc into {gb, suffix}. Returns null if unparseable. */
+/* Parses "8GB", "1.5 TB", "512gb DDR4", or a bare number like "16" (assumed GB) into {gb, suffix}. Returns null if unparseable. */
 function parseAmountGB(str){
   if(!str) return null;
-  const m = String(str).trim().match(/^([\d.]+)\s*(TB|GB)\b\s*(.*)$/i);
-  if(!m) return null;
-  const value = parseFloat(m[1]);
-  if(isNaN(value)) return null;
-  const unit = m[2].toUpperCase();
-  const suffix = (m[3]||'').trim();
-  return { gb: unit==='TB' ? value*1024 : value, suffix };
+  const s = String(str).trim();
+  let m = s.match(/^([\d.]+)\s*(TB|GB)\b\s*(.*)$/i);
+  if(m){
+    const value = parseFloat(m[1]);
+    if(isNaN(value)) return null;
+    const unit = m[2].toUpperCase();
+    const suffix = (m[3]||'').trim();
+    return { gb: unit==='TB' ? value*1024 : value, suffix };
+  }
+  m = s.match(/^([\d.]+)\s*(.*)$/); // bare number, no unit — assume GB
+  if(m){
+    const value = parseFloat(m[1]);
+    if(isNaN(value)) return null;
+    return { gb: value, suffix: (m[2]||'').trim() };
+  }
+  return null;
 }
 /* Formats a GB amount back into a display string, e.g. 1536 -> "1.5TB". Returns '' for 0/negative (field fully removed). */
 function formatAmountGB(gb, suffix){
@@ -218,8 +227,15 @@ function stockItemLabel(r){
   let base;
   if(r.category==='Accessories') base = (r.accessoryType||'')+' — '+(r.description||r.brand||'');
   else {
-    const parts = [r.model, r.processor, r.ram, r.ssd, r.hdd, r.gpu, r.display].filter(Boolean);
-    base = parts.length ? parts.join(' / ') : (r.model || '—');
+    const specParts = [];
+    if(r.processor) specParts.push('processor - '+r.processor);
+    if(r.ram) specParts.push('ram - '+r.ram);
+    if(r.ssd) specParts.push('ssd - '+r.ssd);
+    if(r.hdd) specParts.push('hdd - '+r.hdd);
+    if(r.gpu) specParts.push('graphics card - '+r.gpu);
+    if(r.display) specParts.push('display - '+r.display);
+    const specString = specParts.join(', ');
+    base = r.model ? (specString ? r.model+' — '+specString : r.model) : (specString || '—');
   }
   const mods = (r.modifications||[]).filter(m=>m.type!=='Removed' && !m.fieldKey).map(m=>m.description).filter(Boolean);
   if(mods.length) base += ' + ' + mods.join(', ');
@@ -563,7 +579,8 @@ function toggleStockFields(){
   } else {
     wrap.innerHTML = `<div class="frow"><div class="field"><label>Model</label><input id="st_model"></div><div class="field"><label>Processor</label><input id="st_proc"></div></div>
       <div class="frow"><div class="field"><label>RAM</label><input id="st_ram"></div><div class="field"><label>Graphics Card</label><input id="st_gpu"></div></div>
-      <div class="frow"><div class="field"><label>SSD</label><input id="st_ssd"></div><div class="field"><label>HDD</label><input id="st_hdd"></div></div>
+      <div class="frow"><div class="field"><label>SSD</label><div style="display:flex;gap:6px;"><input id="st_ssd_val" type="number" min="0" step="any" placeholder="e.g. 256" style="flex:1;"><select id="st_ssd_unit" style="width:74px;"><option>GB</option><option>TB</option></select></div></div>
+      <div class="field"><label>HDD</label><div style="display:flex;gap:6px;"><input id="st_hdd_val" type="number" min="0" step="any" placeholder="e.g. 1" style="flex:1;"><select id="st_hdd_unit" style="width:74px;"><option>GB</option><option>TB</option></select></div></div></div>
       <div class="frow"><div class="field"><label>Display Size</label><input id="st_display"></div><div class="field"><label>Serial Number</label><input id="st_serial"></div></div>`;
   }
 }
@@ -579,7 +596,10 @@ async function saveStock(){
     let model='',processor='',ram='',gpu='',ssd='',hdd='',display='',serial='',accessoryType='',brand='',description='';
     if(cat==='Accessories'){ accessoryType=document.getElementById('st_accType').value; brand=document.getElementById('st_brand').value; description=document.getElementById('st_desc').value; }
     else { model=document.getElementById('st_model').value; processor=document.getElementById('st_proc').value; ram=document.getElementById('st_ram').value;
-      gpu=document.getElementById('st_gpu').value; ssd=document.getElementById('st_ssd').value; hdd=document.getElementById('st_hdd').value;
+      gpu=document.getElementById('st_gpu').value;
+      const ssdVal=document.getElementById('st_ssd_val').value, ssdUnit=document.getElementById('st_ssd_unit').value;
+      const hddVal=document.getElementById('st_hdd_val').value, hddUnit=document.getElementById('st_hdd_unit').value;
+      ssd = ssdVal ? ssdVal+ssdUnit : ''; hdd = hddVal ? hddVal+hddUnit : '';
       display=document.getElementById('st_display').value; serial=document.getElementById('st_serial').value; }
     const id = await genId('stock_seq','EZR',4);
     await sb.from('stock').insert({id, category:cat, condition:cond, status:'In Stock', model, processor, ram, gpu, ssd, hdd, display, serial,
@@ -614,12 +634,27 @@ function togglePartAddFields(){
   const kind = partFieldKind(partType);
   const wrap = document.getElementById('pt_valueWrap');
   if(kind==='quantity'){
-    wrap.innerHTML = `<div class="frow full"><div class="field"><label>Amount to add</label><input id="pt_amount" placeholder="e.g. 4GB or 1TB"></div></div>`;
+    if(partType==='SSD' || partType==='HDD'){
+      wrap.innerHTML = `<div class="frow"><div class="field"><label>Amount to add</label><input id="pt_amount_val" type="number" min="0" step="any" placeholder="e.g. 256"></div>
+        <div class="field"><label>Unit</label><select id="pt_amount_unit"><option>GB</option><option>TB</option></select></div></div>`;
+    } else {
+      wrap.innerHTML = `<div class="frow full"><div class="field"><label>Amount to add</label><input id="pt_amount" placeholder="e.g. 4GB or 1TB"></div></div>`;
+    }
   } else if(kind==='singular'){
     wrap.innerHTML = `<div class="frow full"><div class="field"><label>New ${partType} (replaces existing)</label><input id="pt_value" placeholder="e.g. Ryzen 5 5600X"></div></div>`;
   } else {
     wrap.innerHTML = `<div class="frow full"><div class="field"><label>Value / Description</label><input id="pt_desc_other" placeholder="describe the part / work done"></div></div>`;
   }
+}
+/* Reads the "amount" input regardless of whether it's the plain text field (RAM) or the
+   number+unit pair (SSD/HDD), returning a combined string like "256GB" either way. */
+function readPartAmountString(prefix, partType){
+  if(partType==='SSD' || partType==='HDD'){
+    const val = document.getElementById(prefix+'_amount_val').value;
+    const unit = document.getElementById(prefix+'_amount_unit').value;
+    return val ? (val+unit) : '';
+  }
+  return document.getElementById(prefix+'_amount').value.trim();
 }
 async function saveParts(stockId){
   const btn = document.getElementById('pt_save'); btn.disabled = true;
@@ -636,7 +671,7 @@ async function saveParts(stockId){
     let desc = '', fieldKey = null, fieldUpdate = null;
 
     if(kind==='quantity'){
-      const amtStr = document.getElementById('pt_amount').value.trim();
+      const amtStr = readPartAmountString('pt', partType);
       const parsed = parseAmountGB(amtStr);
       if(!parsed){ alert('Enter a valid amount like "4GB" or "1TB".'); btn.disabled=false; return; }
       fieldKey = PART_FIELD_MAP[partType];
@@ -648,6 +683,7 @@ async function saveParts(stockId){
       const val = document.getElementById('pt_value').value.trim();
       if(!val){ alert('Enter the new '+partType+' value.'); btn.disabled=false; return; }
       fieldKey = PART_FIELD_MAP[partType];
+      if(item[fieldKey]){ alert('This item already has a '+partType+' ('+item[fieldKey]+'). Remove it first before adding a new one — a laptop or desktop can only have one.'); btn.disabled=false; return; }
       fieldUpdate = val;
       desc = partType+': '+val;
     } else {
@@ -685,7 +721,12 @@ function toggleRemovePartFields(stockId){
   const wrap = document.getElementById('rp_valueWrap');
   if(kind==='quantity'){
     const current = item[PART_FIELD_MAP[partType]] || '—';
-    wrap.innerHTML = `<div class="frow full"><div class="field"><label>Amount to remove <span style="text-transform:none;">(currently: ${escapeHtml(current)})</span></label><input id="rp_amount" placeholder="e.g. 4GB or 1TB"></div></div>`;
+    if(partType==='SSD' || partType==='HDD'){
+      wrap.innerHTML = `<div class="frow"><div class="field"><label>Amount to remove <span style="text-transform:none;">(currently: ${escapeHtml(current)})</span></label><input id="rp_amount_val" type="number" min="0" step="any" placeholder="e.g. 256"></div>
+        <div class="field"><label>Unit</label><select id="rp_amount_unit"><option>GB</option><option>TB</option></select></div></div>`;
+    } else {
+      wrap.innerHTML = `<div class="frow full"><div class="field"><label>Amount to remove <span style="text-transform:none;">(currently: ${escapeHtml(current)})</span></label><input id="rp_amount" placeholder="e.g. 4GB or 1TB"></div></div>`;
+    }
   } else if(kind==='singular'){
     const current = item[PART_FIELD_MAP[partType]] || '';
     wrap.innerHTML = current
@@ -708,7 +749,7 @@ async function saveRemovePart(stockId){
     let desc = '', fieldKey = null, fieldUpdate = null, accessoryDesc = '';
 
     if(kind==='quantity'){
-      const amtStr = document.getElementById('rp_amount').value.trim();
+      const amtStr = readPartAmountString('rp', partType);
       const parsed = parseAmountGB(amtStr);
       if(!parsed){ alert('Enter a valid amount like "4GB" or "1TB".'); btn.disabled=false; return; }
       fieldKey = PART_FIELD_MAP[partType];
@@ -738,7 +779,7 @@ async function saveRemovePart(stockId){
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
     const newId = await genId('stock_seq','EZR',4);
     await sb.from('stock').insert({id:newId, category:'Accessories', condition:'Old', status:'In Stock',
-      accessory_type: kind==='other' ? 'Others' : partType, description:accessoryDesc, purchase_price:price, purchase_date:date,
+      accessory_type: kind==='other' ? 'Others' : partType, description:accessoryDesc+' ('+stockId+')', purchase_price:price, purchase_date:date,
       notes:'Removed from '+stockId, created_by:STATE.profile.id, created_by_name:STATE.profile.fullName});
     await fetchAll(); closeModal(); render();
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
