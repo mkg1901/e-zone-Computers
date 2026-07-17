@@ -630,6 +630,8 @@ function openStockModal(){
     <div id="st_fields"></div>
     <div class="frow"><div class="field"><label>Purchase Price (₹)</label><input id="st_price" type="number" min="0"></div>
       <div class="field"><label>Purchase Date</label><input id="st_date" type="date" value="${todayISO()}" max="${todayISO()}"></div></div>
+    <div class="frow"><div class="field"><label>Payment Mode</label><select id="st_mode" onchange="toggleBankField('st')"><option>Cash</option><option>Online</option></select></div>
+      <div class="field" id="st_bankWrap" style="display:none;"><label>Bank</label><select id="st_bank">${CACHE.banks.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></div></div>
     <div class="frow full"><div class="field"><label>Seller (required)</label><select id="st_seller"><option value="">— select —</option>${CACHE.sellers.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="st_save" onclick="saveStock()">Save Item</button></div>
   `);
@@ -639,9 +641,10 @@ function toggleStockFields(){
   const cat = document.getElementById('st_cat').value; const wrap = document.getElementById('st_fields');
   if(cat==='Accessories'){
     const options = CACHE.accessoryTypes.length ? CACHE.accessoryTypes : ['Others'];
-    wrap.innerHTML = `<div class="frow"><div class="field"><label>Accessory Type</label><select id="st_accType">${options.map(t=>`<option>${escapeHtml(t)}</option>`).join('')}</select></div>
+    wrap.innerHTML = `<div class="frow"><div class="field"><label>Accessory Type</label><select id="st_accType" onchange="toggleAccessoryCapacityField()">${options.map(t=>`<option>${escapeHtml(t)}</option>`).join('')}</select></div>
       <div class="field"><label>Brand</label><input id="st_brand"></div></div>
-      <div class="frow full"><div class="field"><label>Description</label><input id="st_desc"></div></div>`;
+      <div id="st_accValueWrap"></div>`;
+    toggleAccessoryCapacityField();
   } else {
     wrap.innerHTML = `<div class="frow"><div class="field"><label>Model</label><input id="st_model"></div><div class="field"><label>Processor</label><input id="st_proc"></div></div>
       <div class="frow"><div class="field"><label>Motherboard</label><input id="st_motherboard"></div><div class="field"><label>RAM</label><input id="st_ram"></div></div>
@@ -651,6 +654,23 @@ function toggleStockFields(){
       <div class="frow full"><div class="field"><label>Serial Number</label><input id="st_serial"></div></div>`;
   }
 }
+/* When adding an Accessory whose type is RAM/SSD/HDD (by name or synonym), show a proper
+   Capacity field instead of free text — RAM is always GB; SSD/HDD get a GB/TB choice.
+   This keeps the stored value cleanly parseable so quantities merge correctly later
+   when the accessory is added into a laptop/desktop's configuration. */
+function toggleAccessoryCapacityField(){
+  const type = document.getElementById('st_accType').value;
+  const matched = matchAccessoryToPartType(type);
+  const wrap = document.getElementById('st_accValueWrap');
+  if(matched==='RAM'){
+    wrap.innerHTML = `<div class="frow full"><div class="field"><label>Capacity (GB)</label><input id="st_accCapacity" type="number" min="0" step="any" placeholder="e.g. 8"></div></div>`;
+  } else if(matched==='SSD' || matched==='HDD'){
+    wrap.innerHTML = `<div class="frow"><div class="field"><label>Capacity</label><input id="st_accCapacity" type="number" min="0" step="any" placeholder="e.g. 256"></div>
+      <div class="field"><label>Unit</label><select id="st_accCapacityUnit"><option>GB</option><option>TB</option></select></div></div>`;
+  } else {
+    wrap.innerHTML = `<div class="frow full"><div class="field"><label>Description</label><input id="st_desc"></div></div>`;
+  }
+}
 async function saveStock(){
   const btn = document.getElementById('st_save'); btn.disabled = true;
   try{
@@ -658,11 +678,27 @@ async function saveStock(){
     const price = Number(document.getElementById('st_price').value||0);
     const date = document.getElementById('st_date').value || todayISO();
   if(blockIfFutureDate(date)){ btn.disabled=false; return; }
+    const mode = document.getElementById('st_mode').value;
+    const bankId = mode==='Online' ? document.getElementById('st_bank').value : '';
     const sellerId = document.getElementById('st_seller').value;
     if(!sellerId){ alert('Seller is required.'); btn.disabled=false; return; }
     const sellerNameVal = sellerName(sellerId);
     let model='',processor='',motherboard='',ram='',gpu='',ssd='',hdd='',display='',serial='',accessoryType='',brand='',description='';
-    if(cat==='Accessories'){ accessoryType=document.getElementById('st_accType').value; brand=document.getElementById('st_brand').value; description=document.getElementById('st_desc').value; }
+    if(cat==='Accessories'){
+      accessoryType=document.getElementById('st_accType').value; brand=document.getElementById('st_brand').value;
+      const matched = matchAccessoryToPartType(accessoryType);
+      if(matched==='RAM'){
+        const val = document.getElementById('st_accCapacity').value;
+        if(!val){ alert('Enter the RAM capacity.'); btn.disabled=false; return; }
+        description = val+'GB';
+      } else if(matched==='SSD' || matched==='HDD'){
+        const val = document.getElementById('st_accCapacity').value;
+        if(!val){ alert('Enter the '+matched+' capacity.'); btn.disabled=false; return; }
+        description = val+document.getElementById('st_accCapacityUnit').value;
+      } else {
+        description = document.getElementById('st_desc').value;
+      }
+    }
     else { model=document.getElementById('st_model').value; processor=document.getElementById('st_proc').value; motherboard=document.getElementById('st_motherboard').value; ram=document.getElementById('st_ram').value;
       gpu=document.getElementById('st_gpu').value;
       const ssdVal=document.getElementById('st_ssd_val').value, ssdUnit=document.getElementById('st_ssd_unit').value;
@@ -675,9 +711,9 @@ async function saveStock(){
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName}), 'Creating stock item');
     const purchaseId = await genId('purchase_seq','PUR',4);
     throwIfDbError(await sb.from('purchases').insert({id:purchaseId, stock_id:id, seller_id:sellerId||null, seller_name:sellerNameVal,
-      product_label: cat==='Accessories'?accessoryType:model, purchase_price:price, qty:1, date, payment_mode:'Cash', amount_paid:price, due:0,
+      product_label: cat==='Accessories'?accessoryType:model, purchase_price:price, qty:1, date, payment_mode:mode, bank_id:bankId||null, amount_paid:price, due:0,
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName}), 'Creating purchase record');
-    await insertLedger({date, type:'Purchase', mode:'Cash', bankId:'', amount:-price, refType:'stock', refId:id, note:'Stock purchase: '+id});
+    await insertLedger({date, type:'Purchase', mode:mode==='Online'?'Bank':'Cash', bankId, amount:-price, refType:'stock', refId:id, note:'Stock purchase: '+id});
     await fetchAll(); closeModal(); render();
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
 }
