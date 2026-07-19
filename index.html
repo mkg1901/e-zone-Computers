@@ -315,7 +315,7 @@ async function fetchAll(){
     id:s.id, category:s.category, condition:s.condition, status:s.status, model:s.model, processor:s.processor, motherboard:s.motherboard,
     ram:s.ram, gpu:s.gpu, ssd:s.ssd, hdd:s.hdd, display:s.display, serial:s.serial, accessoryType:s.accessory_type,
     brand:s.brand, description:s.description, purchasePrice:s.purchase_price, purchaseDate:s.purchase_date,
-    sellerId:s.seller_id, sellerName:s.seller_name, notes:s.notes, createdByName:s.created_by_name,
+    sellerId:s.seller_id, sellerName:s.seller_name, notes:s.notes, createdByName:s.created_by_name, blockedFor:s.blocked_for||null,
     modifications: modsList.filter(m=>m.stock_id===s.id).map(m=>({description:m.description,cost:m.cost,date:m.date,mode:m.mode,bankId:m.bank_id,createdByName:m.created_by_name,type:m.type||'Added',fieldKey:m.field_key||null}))
   }));
   CACHE.purchases = (purchases.data||[]).map(p=>({id:p.id,stockId:p.stock_id,sellerId:p.seller_id,sellerName:p.seller_name,
@@ -840,6 +840,24 @@ function toggleRemovePartFields(stockId){
     wrap.innerHTML = `<div class="frow full"><div class="field"><label>Value / Description</label><input id="rp_desc_other" placeholder="describe what's being removed"></div></div>`;
   }
 }
+/* Looks for a Blocked accessory that's linked to this exact stock item and matches the
+   part being removed — so removal can RESTORE the original accessory instead of creating
+   a duplicate. Only auto-restores on an unambiguous match (quantity parts must match the
+   removed amount exactly, singular parts must have exactly one candidate); otherwise
+   returns null and the caller falls back to spinning off a new item, same as before. */
+function findBlockedAccessoryMatch(stockId, partType, removedAmountStr){
+  const candidates = CACHE.stock.filter(s=>s.status==='Blocked' && s.blockedFor===stockId && matchAccessoryToPartType(s.accessoryType)===partType);
+  if(candidates.length===0) return null;
+  if(partFieldKind(partType)==='singular'){
+    return candidates.length===1 ? candidates[0] : null;
+  }
+  if(candidates.length===1){
+    const parsed = parseAmountGB(candidates[0].description);
+    const removedParsed = parseAmountGB(removedAmountStr);
+    if(parsed && removedParsed && Math.abs(parsed.gb - removedParsed.gb) < 0.001) return candidates[0];
+  }
+  return null;
+}
 async function saveRemovePart(stockId){
   const btn = document.getElementById('rp_save'); btn.disabled = true;
   try{
@@ -851,10 +869,11 @@ async function saveRemovePart(stockId){
     if(price<=0){ alert('Enter a valid price for the removed part.'); btn.disabled=false; return; }
     const item = CACHE.stock.find(s=>s.id===stockId);
     if(price > stockTotalCost(item)){ alert('Assigned price cannot be more than the current Total Cost of this item (' + inr(stockTotalCost(item)) + ').'); btn.disabled=false; return; }
-    let desc = '', fieldKey = null, fieldUpdate = null, accessoryDesc = '';
+    let desc = '', fieldKey = null, fieldUpdate = null, accessoryDesc = '', removedAmountStr = null;
 
     if(kind==='quantity'){
       const amtStr = readPartAmountString('rp', partType);
+      removedAmountStr = amtStr;
       const parsed = parseAmountGB(amtStr);
       if(!parsed){ alert('Enter a valid amount like "4GB" or "1TB".'); btn.disabled=false; return; }
       fieldKey = PART_FIELD_MAP[partType];
@@ -882,10 +901,18 @@ async function saveRemovePart(stockId){
     if(fieldKey){ throwIfDbError(await sb.from('stock').update({ [fieldKey]: fieldUpdate }).eq('id', stockId), 'Updating configuration'); }
     throwIfDbError(await sb.from('stock_modifications').insert({stock_id:stockId, description:desc, cost:price, date, mode:'', bank_id:null, type:'Removed', field_key:fieldKey,
       created_by:STATE.profile.id, created_by_name:STATE.profile.fullName}), 'Recording removal');
-    const newId = await genId('stock_seq','EZR',4);
-    throwIfDbError(await sb.from('stock').insert({id:newId, category:'Accessories', condition:'Old', status:'In Stock',
-      accessory_type: kind==='other' ? 'Others' : partType, description:accessoryDesc+' ('+stockId+')', purchase_price:price, purchase_date:date,
-      notes:'Removed from '+stockId, created_by:STATE.profile.id, created_by_name:STATE.profile.fullName}), 'Creating removed-part stock item');
+
+    // If this exact part was originally added FROM an accessory still linked (Blocked) to
+    // this item, restore that same accessory instead of creating a duplicate stock entry.
+    const restoreMatch = kind!=='other' ? findBlockedAccessoryMatch(stockId, partType, removedAmountStr) : null;
+    if(restoreMatch){
+      throwIfDbError(await sb.from('stock').update({ status:'In Stock', blocked_for:null, notes:'' }).eq('id', restoreMatch.id), 'Restoring accessory');
+    } else {
+      const newId = await genId('stock_seq','EZR',4);
+      throwIfDbError(await sb.from('stock').insert({id:newId, category:'Accessories', condition:'Old', status:'In Stock',
+        accessory_type: kind==='other' ? 'Others' : partType, description:accessoryDesc+' ('+stockId+')', purchase_price:price, purchase_date:date,
+        notes:'Removed from '+stockId, created_by:STATE.profile.id, created_by_name:STATE.profile.fullName}), 'Creating removed-part stock item');
+    }
     await fetchAll(); closeModal(); render();
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
 }
