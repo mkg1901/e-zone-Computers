@@ -592,6 +592,15 @@ function renderStock(){
         : '<span class="pill green">In Stock</span>';
       const canAddParts = r.status==='In Stock' && r.category!=='Accessories';
       const canRemoveParts = r.status==='In Stock' && r.category!=='Accessories';
+      const parts = [];
+      if(canAddParts) parts.push(`<a class="link" onclick="openPartsModal('${r.id}')">+ Add Parts</a>`);
+      if(canRemoveParts) parts.push(`<a class="link" style="color:var(--red)" onclick="openRemovePartModal('${r.id}')">− Remove Part</a>`);
+      if(isAdmin()){
+        if(r.status==='Sold') parts.push(`<a class="link" onclick="restore_stock('${r.id}')">↩ Restore to In Stock</a>`);
+        parts.push(`<a class="link" onclick="openEdit_stock('${r.id}')">Edit</a>`);
+        parts.push(`<a class="link" style="color:var(--red)" onclick="delete_stock('${r.id}')">Delete</a>`);
+      }
+      const actionCell = parts.length ? parts.join(' &nbsp;') : '—';
       return `<tr><td class="mono">${r.id}</td><td>${fmtDate(r.purchaseDate)}</td><td>${r.category}</td><td>${r.condition}</td>
       <td>${stockItemLabel(r, true)}
         ${r.notes ? `<div class="note" style="margin:6px 0 0 0;padding:6px 8px;font-size:11px;">${escapeHtml(r.notes)}</div>` : ''}
@@ -599,7 +608,7 @@ function renderStock(){
       <td class="mono">${inr(r.purchasePrice)}</td>
       <td class="mono">${inr(stockTotalCost(r))}</td><td>${escapeHtml(r.sellerName||'—')}</td>
       <td>${statusPill}</td>
-      <td>${canAddParts?`<a class="link" onclick="openPartsModal('${r.id}')">+ Add Parts</a>`:''}${canRemoveParts?` &nbsp;<a class="link" style="color:var(--red)" onclick="openRemovePartModal('${r.id}')">− Remove Part</a>`:''}${!canAddParts && !canRemoveParts?'—':''}</td></tr>`;
+      <td>${actionCell}</td></tr>`;
     })}
     <div class="note">Use <b>+ Add Parts</b> to attach an in-stock Accessory into a laptop/desktop (cost is added to Total Cost; the accessory becomes Blocked and can't be sold on its own). Use <b>− Remove Part</b> to take a component out — its value is subtracted from Total Cost (Purchase Price never changes), and a new Accessories item is created automatically. Selling a laptop/desktop automatically marks its Blocked accessories as Sold too.</div>
   `;
@@ -917,6 +926,344 @@ async function saveRemovePart(stockId){
   }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
 }
 
+/* ================= EDIT / DELETE (Admin only) =================
+   Shared helpers for editing and deleting Sales, Purchases, Expenses
+   and Stock. All destructive actions are Admin-only in the UI AND at the
+   database level (see migration-edit-delete-rls.sql). Every ledger row
+   carries ref_type + ref_id, so we reverse a record's cash/bank impact by
+   deleting exactly the ledger rows pointing at it — keeping Cash and Bank
+   balances correct. All writes go through throwIfDbError(). */
+
+// Delete every ledger row linked to a given record (its cash/bank reversal).
+async function deleteLedgerFor(refType, refId){
+  throwIfDbError(await sb.from('ledger').delete().eq('ref_type', refType).eq('ref_id', refId), 'Removing ledger entries');
+}
+// Small action-cell builder shown only to Admins.
+function editDeleteActions(kind, id){
+  if(!isAdmin()) return '—';
+  return `<a class="link" onclick="openEdit_${kind}('${id}')">Edit</a>`
+    + ` &nbsp;<a class="link" style="color:var(--red)" onclick="delete_${kind}('${id}')">Delete</a>`;
+}
+
+/* ---------- DELETE: SALE ---------- */
+// Reverse ledger, return the sold Stock item (and its cascaded accessories)
+// back to In Stock / Blocked, then remove the sale row.
+async function delete_sale(id){
+  if(!isAdmin()) return;
+  const sale = CACHE.sales.find(s=>s.id===id); if(!sale) return;
+  if(!confirm(`Delete Sale ${id}?\n\nThis will:\n• remove its ledger/cash entries\n• return stock item ${sale.stockId||'—'} to In Stock\n\nThis cannot be undone.`)) return;
+  try{
+    await deleteLedgerFor('sale', id);
+    if(sale.stockId){
+      throwIfDbError(await sb.from('stock').update({status:'In Stock'}).eq('id', sale.stockId), 'Restoring stock item');
+      // Accessories that were cascaded to Sold with the parent go back to Blocked.
+      throwIfDbError(await sb.from('stock').update({status:'Blocked'}).eq('blocked_for', sale.stockId).eq('status','Sold'), 'Restoring blocked accessories');
+    }
+    throwIfDbError(await sb.from('sales').delete().eq('id', id), 'Deleting sale');
+    await fetchAll(); render();
+  }catch(e){ alert('Delete failed: '+e.message); }
+}
+
+/* ---------- DELETE: PURCHASE ---------- */
+// Reverse ledger; the purchase auto-created a Stock item, so delete that too
+// when it's still unsold and unused. Block if the stock was sold or has parts
+// blocked into it.
+async function delete_purchase(id){
+  if(!isAdmin()) return;
+  const pur = CACHE.purchases.find(p=>p.id===id); if(!pur) return;
+  const stock = pur.stockId ? CACHE.stock.find(s=>s.id===pur.stockId) : null;
+  if(stock){
+    if(stock.status==='Sold'){ alert(`Cannot delete Purchase ${id}: its stock item ${stock.id} is already Sold. Delete the Sale first (or restore it to In Stock), then delete this purchase.`); return; }
+    const blocked = CACHE.stock.filter(s=>s.blockedFor===stock.id);
+    if(blocked.length){ alert(`Cannot delete Purchase ${id}: stock item ${stock.id} has ${blocked.length} accessory part(s) blocked into it. Remove those parts first.`); return; }
+  }
+  if(!confirm(`Delete Purchase ${id}?\n\nThis will:\n• remove its ledger/cash entries\n${stock?`• delete the linked stock item ${stock.id}\n`:''}\nThis cannot be undone.`)) return;
+  try{
+    await deleteLedgerFor('purchase', id);
+    throwIfDbError(await sb.from('purchases').delete().eq('id', id), 'Deleting purchase');
+    if(stock){
+      // stock_modifications cascade-delete with the stock row (FK on delete cascade).
+      throwIfDbError(await sb.from('stock').delete().eq('id', stock.id), 'Deleting linked stock item');
+    }
+    await fetchAll(); render();
+  }catch(e){ alert('Delete failed: '+e.message); }
+}
+
+/* ---------- DELETE: EXPENSE ---------- */
+async function delete_expense(id){
+  if(!isAdmin()) return;
+  const ex = CACHE.expenses.find(e=>e.id===id); if(!ex) return;
+  if(!confirm(`Delete Expense ${id} (${inr(ex.amount)})?\n\nIts ledger/cash entry will be reversed. This cannot be undone.`)) return;
+  try{
+    await deleteLedgerFor('expense', id);
+    throwIfDbError(await sb.from('expenses').delete().eq('id', id), 'Deleting expense');
+    await fetchAll(); render();
+  }catch(e){ alert('Delete failed: '+e.message); }
+}
+
+/* ---------- DELETE: STOCK ---------- */
+// Sold stock cannot be deleted (restore to In Stock first). Unsold stock:
+// delete its linked Purchase + ledger, then the stock (mods cascade).
+// Blocked accessories inside it must be removed first.
+async function delete_stock(id){
+  if(!isAdmin()) return;
+  const stock = CACHE.stock.find(s=>s.id===id); if(!stock) return;
+  if(stock.status==='Sold'){
+    alert(`Stock item ${id} is Sold and cannot be deleted directly.\n\nUse "Restore to In Stock" first (this removes the linked Sale and reverses its cash entry), then delete if you still need to.`);
+    return;
+  }
+  if(stock.status==='Blocked'){
+    alert(`Stock item ${id} is an accessory currently blocked inside another machine, so it can't be deleted on its own. Remove it from that machine first ("− Remove Part").`);
+    return;
+  }
+  const childAccessories = CACHE.stock.filter(s=>s.blockedFor===id);
+  if(childAccessories.length){
+    alert(`Cannot delete ${id}: it has ${childAccessories.length} accessory part(s) blocked into it. Remove those parts first ("− Remove Part").`);
+    return;
+  }
+  const linkedPurchase = CACHE.purchases.find(p=>p.stockId===id);
+  if(!confirm(`Delete Stock item ${id}?\n\nThis will:\n${linkedPurchase?`• delete its linked purchase ${linkedPurchase.id} and reverse that cash entry\n`:''}• delete its parts history\n\nThis cannot be undone.`)) return;
+  try{
+    if(linkedPurchase){
+      await deleteLedgerFor('purchase', linkedPurchase.id);
+      throwIfDbError(await sb.from('purchases').delete().eq('id', linkedPurchase.id), 'Deleting linked purchase');
+    }
+    // Any part-removal spin-offs also created ledger? No — parts moves create no ledger.
+    throwIfDbError(await sb.from('stock').delete().eq('id', id), 'Deleting stock item');
+    await fetchAll(); render();
+  }catch(e){ alert('Delete failed: '+e.message); }
+}
+
+/* ---------- RESTORE: SOLD STOCK -> IN STOCK ---------- */
+// Undo a sale from the Stock side: delete the linked Sale, reverse its
+// ledger, un-cascade its accessories back to Blocked, set status In Stock.
+async function restore_stock(id){
+  if(!isAdmin()) return;
+  const stock = CACHE.stock.find(s=>s.id===id); if(!stock || stock.status!=='Sold') return;
+  const sale = CACHE.sales.find(s=>s.stockId===id);
+  if(!confirm(`Restore ${id} to In Stock?\n\n${sale?`This will delete the linked Sale ${sale.id} and reverse its cash entry.\n\n`:''}This cannot be undone.`)) return;
+  try{
+    if(sale){
+      await deleteLedgerFor('sale', sale.id);
+      throwIfDbError(await sb.from('sales').delete().eq('id', sale.id), 'Deleting linked sale');
+    }
+    throwIfDbError(await sb.from('stock').update({status:'In Stock'}).eq('id', id), 'Restoring stock item');
+    throwIfDbError(await sb.from('stock').update({status:'Blocked'}).eq('blocked_for', id).eq('status','Sold'), 'Restoring blocked accessories');
+    await fetchAll(); render();
+  }catch(e){ alert('Restore failed: '+e.message); }
+}
+
+/* ---------- EDIT: SALE ---------- */
+function openEdit_sale(id){
+  const s = CACHE.sales.find(x=>x.id===id); if(!s) return;
+  // Editable stock list = items currently In Stock, PLUS the one this sale
+  // already points at (which is Sold), so it stays selectable.
+  const available = CACHE.stock.filter(st=>st.status==='In Stock' || st.id===s.stockId);
+  const stockOpt = st=>`<option value="${st.id}" ${st.id===s.stockId?'selected':''}>${st.id} — ${escapeHtml(st.category==='Accessories'?(st.accessoryType+' '+(st.description||'')):(st.model||st.category))}</option>`;
+  showModal(`
+    <h3>Edit Sale — ${id}</h3>
+    <div class="frow full"><div class="field"><label>Stock Item</label><select id="esl_stock">${available.map(stockOpt).join('')}</select></div></div>
+    <div class="frow"><div class="field"><label>Buyer</label><select id="esl_buyer"><option value="">— select —</option>
+      ${CACHE.customers.map(c=>`<option value="${c.id}" ${c.id===s.buyerId?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}<option value="__new__">+ New buyer…</option></select></div>
+      <div class="field" id="esl_newBuyerWrap" style="display:none;"><label>New Buyer Name</label><input id="esl_newBuyer"></div></div>
+    <div class="frow"><div class="field"><label>Selling Price (₹)</label><input id="esl_price" type="number" min="0" value="${s.salePrice}"></div>
+      <div class="field"><label>Date</label><input id="esl_date" type="date" value="${s.date}" max="${todayISO()}"></div></div>
+    <div class="frow"><div class="field"><label>Payment Mode</label><select id="esl_mode" onchange="toggleBankField('esl')"><option ${s.paymentMode==='Cash'?'selected':''}>Cash</option><option ${s.paymentMode==='Online'?'selected':''}>Online</option></select></div>
+      <div class="field" id="esl_bankWrap" style="display:${s.paymentMode==='Online'?'block':'none'};"><label>Bank</label><select id="esl_bank">${CACHE.banks.map(b=>`<option value="${b.id}" ${b.id===s.bankId?'selected':''}>${b.name}</option>`).join('')}</select></div></div>
+    <div class="frow full"><div class="field"><label>Amount Received (₹)</label><input id="esl_received" type="number" min="0" value="${s.amountReceived}"></div></div>
+    <div class="note">Editing recomputes the linked cash/bank entry so balances stay correct. Changing the stock item returns the old one to In Stock and marks the new one Sold.</div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="esl_save" onclick="saveEdit_sale('${id}')">Save Changes</button></div>
+  `);
+  document.getElementById('esl_buyer').addEventListener('change', e=>{ document.getElementById('esl_newBuyerWrap').style.display = e.target.value==='__new__'?'block':'none'; });
+}
+async function saveEdit_sale(id){
+  const btn = document.getElementById('esl_save'); btn.disabled = true;
+  try{
+    const orig = CACHE.sales.find(x=>x.id===id); if(!orig) throw new Error('Sale not found');
+    const newStockId = document.getElementById('esl_stock').value;
+    if(!newStockId){ alert('Select a stock item.'); btn.disabled=false; return; }
+    let buyerSel = document.getElementById('esl_buyer').value, buyerId, buyerNameVal;
+    if(buyerSel==='__new__'){
+      const name = document.getElementById('esl_newBuyer').value.trim();
+      if(!name){ alert('Enter the new buyer name.'); btn.disabled=false; return; }
+      buyerId = await genId('customer_seq','CUS',4);
+      throwIfDbError(await sb.from('customers').insert({id:buyerId, name, phone:'', address:''}), 'Adding buyer');
+      buyerNameVal = name;
+    } else if(buyerSel){ buyerId = buyerSel; buyerNameVal = customerName(buyerSel); }
+    else { alert('Select a buyer.'); btn.disabled=false; return; }
+    const price = Number(document.getElementById('esl_price').value||0);
+    const date = document.getElementById('esl_date').value || todayISO();
+    if(blockIfFutureDate(date)){ btn.disabled=false; return; }
+    const mode = document.getElementById('esl_mode').value;
+    const bankId = mode==='Online' ? document.getElementById('esl_bank').value : '';
+    const received = Number(document.getElementById('esl_received').value||0);
+    const due = Math.max(0, price-received);
+    const newStock = CACHE.stock.find(s=>s.id===newStockId);
+    const stockLabel = newStock.category==='Accessories'?(newStock.accessoryType+' '+(newStock.description||'')):(newStock.model||newStock.category);
+
+    // If the stock item changed, un-sell the old one and sell the new one.
+    if(orig.stockId !== newStockId){
+      if(orig.stockId){
+        throwIfDbError(await sb.from('stock').update({status:'In Stock'}).eq('id', orig.stockId), 'Restoring old stock item');
+        throwIfDbError(await sb.from('stock').update({status:'Blocked'}).eq('blocked_for', orig.stockId).eq('status','Sold'), 'Restoring old accessories');
+      }
+      throwIfDbError(await sb.from('stock').update({status:'Sold'}).eq('id', newStockId), 'Marking new item Sold');
+      throwIfDbError(await sb.from('stock').update({status:'Sold'}).eq('blocked_for', newStockId).eq('status','Blocked'), 'Cascading new accessories Sold');
+    }
+
+    throwIfDbError(await sb.from('sales').update({stock_id:newStockId, stock_label:stockLabel, buyer_id:buyerId, buyer_name:buyerNameVal,
+      sale_price:price, date, payment_mode:mode, bank_id:bankId||null, amount_received:received, due}).eq('id', id), 'Updating sale');
+
+    // Rebuild the ledger entry for this sale from scratch (simplest correct path).
+    await deleteLedgerFor('sale', id);
+    if(received>0) await insertLedger({date, type:'Sale', mode:mode==='Online'?'Bank':'Cash', bankId, amount:received, refType:'sale', refId:id, note:'Sale '+id+' — '+newStockId});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
+/* ---------- EDIT: PURCHASE ---------- */
+function openEdit_purchase(id){
+  const p = CACHE.purchases.find(x=>x.id===id); if(!p) return;
+  const linkedStock = p.stockId ? CACHE.stock.find(s=>s.id===p.stockId) : null;
+  const cat = linkedStock ? linkedStock.category : 'Laptop';
+  showModal(`
+    <h3>Edit Purchase — ${id}</h3>
+    <div class="frow"><div class="field"><label>Seller</label><select id="epu_seller"><option value="">— select —</option>
+      ${CACHE.sellers.map(s=>`<option value="${s.id}" ${s.id===p.sellerId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}<option value="__new__">+ New seller…</option></select></div>
+      <div class="field" id="epu_newSellerWrap" style="display:none;"><label>New Seller Name</label><input id="epu_newSeller"></div></div>
+    <div class="frow"><div class="field"><label>Category</label><select id="epu_cat"><option ${cat==='Laptop'?'selected':''}>Laptop</option><option ${cat==='Desktop'?'selected':''}>Desktop</option><option ${cat==='Accessories'?'selected':''}>Accessories</option></select></div>
+      <div class="field"><label>Item / Description</label><input id="epu_desc" value="${escapeHtml(p.productLabel||'')}"></div></div>
+    <div class="frow"><div class="field"><label>Purchase Price (₹)</label><input id="epu_price" type="number" min="0" value="${p.purchasePrice}"></div>
+      <div class="field"><label>Quantity</label><input id="epu_qty" type="number" min="1" value="${p.qty||1}"></div></div>
+    <div class="frow"><div class="field"><label>Payment Mode</label><select id="epu_mode" onchange="toggleBankField('epu')"><option ${p.paymentMode==='Cash'?'selected':''}>Cash</option><option ${p.paymentMode==='Online'?'selected':''}>Online</option></select></div>
+      <div class="field" id="epu_bankWrap" style="display:${p.paymentMode==='Online'?'block':'none'};"><label>Bank</label><select id="epu_bank">${CACHE.banks.map(b=>`<option value="${b.id}" ${b.id===p.bankId?'selected':''}>${b.name}</option>`).join('')}</select></div></div>
+    <div class="frow"><div class="field"><label>Amount Paid (₹)</label><input id="epu_paid" type="number" min="0" value="${p.amountPaid}"></div>
+      <div class="field"><label>Date</label><input id="epu_date" type="date" value="${p.date}" max="${todayISO()}"></div></div>
+    <div class="note">Editing recomputes the linked cash/bank entry.${linkedStock?` The linked stock item ${linkedStock.id}'s Purchase Price, seller, category and description are kept in sync.`:''}</div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="epu_save" onclick="saveEdit_purchase('${id}')">Save Changes</button></div>
+  `);
+  document.getElementById('epu_seller').addEventListener('change', e=>{ document.getElementById('epu_newSellerWrap').style.display = e.target.value==='__new__'?'block':'none'; });
+}
+async function saveEdit_purchase(id){
+  const btn = document.getElementById('epu_save'); btn.disabled = true;
+  try{
+    const orig = CACHE.purchases.find(x=>x.id===id); if(!orig) throw new Error('Purchase not found');
+    let sellerSel = document.getElementById('epu_seller').value, sellerId, sellerNameVal;
+    if(sellerSel==='__new__'){
+      const name = document.getElementById('epu_newSeller').value.trim();
+      if(!name){ alert('Enter the new seller name.'); btn.disabled=false; return; }
+      sellerId = await genId('seller_seq','SEL',4);
+      throwIfDbError(await sb.from('sellers').insert({id:sellerId, name, phone:'', address:''}), 'Adding seller');
+      sellerNameVal = name;
+    } else if(sellerSel){ sellerId = sellerSel; sellerNameVal = sellerName(sellerSel); }
+    else { alert('Select a seller.'); btn.disabled=false; return; }
+    const cat = document.getElementById('epu_cat').value;
+    const desc = document.getElementById('epu_desc').value.trim();
+    const price = Number(document.getElementById('epu_price').value||0);
+    const qty = Number(document.getElementById('epu_qty').value||1);
+    const mode = document.getElementById('epu_mode').value;
+    const bankId = mode==='Online' ? document.getElementById('epu_bank').value : '';
+    const paid = Number(document.getElementById('epu_paid').value||0);
+    const date = document.getElementById('epu_date').value || todayISO();
+    if(blockIfFutureDate(date)){ btn.disabled=false; return; }
+    const due = Math.max(0, (price*qty)-paid);
+
+    throwIfDbError(await sb.from('purchases').update({seller_id:sellerId, seller_name:sellerNameVal, product_label:desc,
+      purchase_price:price, qty, date, payment_mode:mode, bank_id:bankId||null, amount_paid:paid, due}).eq('id', id), 'Updating purchase');
+
+    // Keep the auto-created stock item in sync (Purchase Price on a fresh
+    // purchase-created item is its original cost). Only touch it if unsold.
+    const linkedStock = orig.stockId ? CACHE.stock.find(s=>s.id===orig.stockId) : null;
+    if(linkedStock && linkedStock.status!=='Sold'){
+      const stockPatch = { seller_id:sellerId, seller_name:sellerNameVal, purchase_price:price, purchase_date:date, category:cat,
+        model: cat!=='Accessories'?desc:'', accessory_type: cat==='Accessories'?desc:'', description: cat==='Accessories'?desc:'' };
+      throwIfDbError(await sb.from('stock').update(stockPatch).eq('id', linkedStock.id), 'Syncing linked stock item');
+    }
+
+    await deleteLedgerFor('purchase', id);
+    if(paid>0) await insertLedger({date, type:'Purchase', mode:mode==='Online'?'Bank':'Cash', bankId, amount:-paid, refType:'purchase', refId:id, note:'Purchase '+id});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
+/* ---------- EDIT: EXPENSE ---------- */
+function openEdit_expense(id){
+  const e = CACHE.expenses.find(x=>x.id===id); if(!e) return;
+  const cats = ['Rent','Electricity','Internet','Salary','Office Expense','Miscellaneous'];
+  showModal(`
+    <h3>Edit Expense — ${id}</h3>
+    <div class="frow"><div class="field"><label>Category</label><select id="eex_cat">${cats.map(c=>`<option ${c===e.category?'selected':''}>${c}</option>`).join('')}</select></div>
+      <div class="field"><label>Amount (₹)</label><input id="eex_amount" type="number" min="0" value="${e.amount}"></div></div>
+    <div class="frow"><div class="field"><label>Payment Mode</label><select id="eex_mode" onchange="toggleBankField('eex')"><option ${e.paymentMode==='Cash'?'selected':''}>Cash</option><option ${e.paymentMode==='Online'?'selected':''}>Online</option></select></div>
+      <div class="field" id="eex_bankWrap" style="display:${e.paymentMode==='Online'?'block':'none'};"><label>Bank</label><select id="eex_bank">${CACHE.banks.map(b=>`<option value="${b.id}" ${b.id===e.bankId?'selected':''}>${b.name}</option>`).join('')}</select></div></div>
+    <div class="frow"><div class="field"><label>Date</label><input id="eex_date" type="date" value="${e.date}" max="${todayISO()}"></div><div class="field"><label>Note</label><input id="eex_note" value="${escapeHtml(e.note||'')}"></div></div>
+    <div class="note">Editing recomputes the linked cash/bank entry so balances stay correct.</div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="eex_save" onclick="saveEdit_expense('${id}')">Save Changes</button></div>
+  `);
+}
+async function saveEdit_expense(id){
+  const btn = document.getElementById('eex_save'); btn.disabled = true;
+  try{
+    const category = document.getElementById('eex_cat').value;
+    const amount = Number(document.getElementById('eex_amount').value||0);
+    if(amount<=0){ alert('Enter a valid amount.'); btn.disabled=false; return; }
+    const mode = document.getElementById('eex_mode').value;
+    const bankId = mode==='Online' ? document.getElementById('eex_bank').value : '';
+    const date = document.getElementById('eex_date').value || todayISO();
+    if(blockIfFutureDate(date)){ btn.disabled=false; return; }
+    const note = document.getElementById('eex_note').value;
+    throwIfDbError(await sb.from('expenses').update({category, amount, payment_mode:mode, bank_id:bankId||null, date, note}).eq('id', id), 'Updating expense');
+    await deleteLedgerFor('expense', id);
+    await insertLedger({date, type:'Spending/Expense', mode:mode==='Online'?'Bank':'Cash', bankId, amount:-amount, refType:'expense', refId:id, note:category+(note?' — '+note:'')});
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
+/* ---------- EDIT: STOCK ---------- */
+// Edit core identity/config fields. Purchase Price is intentionally NOT
+// editable here — rule 15: Purchase Price is immutable once set. Total Cost
+// moves only via Add/Remove Parts. If a purchase created this item, editing
+// its price belongs on the Purchase (which syncs back).
+function openEdit_stock(id){
+  const s = CACHE.stock.find(x=>x.id===id); if(!s) return;
+  const isAcc = s.category==='Accessories';
+  const line = (label,field,val)=>`<div class="field"><label>${label}</label><input id="est_${field}" value="${escapeHtml(val||'')}"></div>`;
+  const configFields = isAcc
+    ? `<div class="frow"><div class="field"><label>Accessory Type</label><select id="est_accessoryType">${CACHE.accessoryTypes.map(t=>`<option ${t===s.accessoryType?'selected':''}>${escapeHtml(t)}</option>`).join('')}</select></div>${line('Description','description',s.description)}</div>`
+    : `<div class="frow">${line('Model','model',s.model)}${line('Processor','processor',s.processor)}</div>
+       <div class="frow">${line('Motherboard','motherboard',s.motherboard)}${line('RAM','ram',s.ram)}</div>
+       <div class="frow">${line('SSD','ssd',s.ssd)}${line('HDD','hdd',s.hdd)}</div>
+       <div class="frow">${line('Graphics Card','gpu',s.gpu)}${line('Display','display',s.display)}</div>
+       <div class="frow">${line('Serial','serial',s.serial)}<div class="field"></div></div>`;
+  showModal(`
+    <h3>Edit Stock Item — ${id}</h3>
+    <div class="modal-sub">Purchase Price (${inr(s.purchasePrice)}) is fixed and can't be changed here — edit the linked Purchase to correct it. Total Cost moves via Add/Remove Parts.</div>
+    <div class="frow"><div class="field"><label>Condition</label><select id="est_cond"><option ${s.condition==='New'?'selected':''}>New</option><option ${s.condition==='Old'?'selected':''}>Old</option></select></div>
+      <div class="field"><label>Purchase Date</label><input id="est_date" type="date" value="${s.purchaseDate||''}" max="${todayISO()}"></div></div>
+    ${configFields}
+    <div class="frow full"><div class="field"><label>Seller (required)</label><select id="est_seller"><option value="">— select —</option>${CACHE.sellers.map(sl=>`<option value="${sl.id}" ${sl.id===s.sellerId?'selected':''}>${escapeHtml(sl.name)}</option>`).join('')}</select></div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="est_save" onclick="saveEdit_stock('${id}')">Save Changes</button></div>
+  `);
+}
+async function saveEdit_stock(id){
+  const btn = document.getElementById('est_save'); btn.disabled = true;
+  try{
+    const s = CACHE.stock.find(x=>x.id===id); if(!s) throw new Error('Stock item not found');
+    const isAcc = s.category==='Accessories';
+    const sellerId = document.getElementById('est_seller').value;
+    if(!sellerId){ alert('Seller is required.'); btn.disabled=false; return; }
+    const date = document.getElementById('est_date').value || null;
+    if(date && blockIfFutureDate(date)){ btn.disabled=false; return; }
+    const val = f=>{ const el=document.getElementById('est_'+f); return el?el.value.trim():''; };
+    const patch = { condition: document.getElementById('est_cond').value, purchase_date: date,
+      seller_id: sellerId, seller_name: sellerName(sellerId) };
+    if(isAcc){ patch.accessory_type = document.getElementById('est_accessoryType').value; patch.description = val('description'); }
+    else { ['model','processor','motherboard','ram','ssd','hdd','gpu','display','serial'].forEach(f=>patch[f]=val(f)); }
+    throwIfDbError(await sb.from('stock').update(patch).eq('id', id), 'Updating stock item');
+    await fetchAll(); closeModal(); render();
+  }catch(e){ alert('Save failed: '+e.message); btn.disabled=false; }
+}
+
 /* ================= SALES ================= */
 function renderSales(){
   const ym = ensureMonthState('salesMonth');
@@ -926,11 +1273,11 @@ function renderSales(){
     ${monthSwitcherHTML('salesMonth','Sales —')}
     <div class="sec-head"><h3>Sales <span>${rows.length} invoices · ${inr(monthTotal)} in ${monthLabel(ym)}</span></h3>
       <button class="btn" onclick="openSaleModal()">+ New Sale</button></div>
-    ${tableOrEmpty(rows, ['Date','Invoice','Item','Buyer','Sale ₹','Received','Due','By'], r=>`
+    ${tableOrEmpty(rows, ['Date','Invoice','Item','Buyer','Sale ₹','Received','Due','By','Action'], r=>`
       <tr><td>${fmtDate(r.date)}</td><td class="mono">${r.id}</td><td>${escapeHtml(r.stockLabel||'—')}</td>
       <td>${escapeHtml(r.buyerName||'—')}</td><td class="mono">${inr(r.salePrice)}</td><td class="mono">${inr(r.amountReceived)}</td>
       <td>${r.due>0?`<span class="pill amber">${inr(r.due)}</span>`:`<span class="pill green">Paid</span>`}</td>
-      <td>${escapeHtml(r.createdByName||'—')}</td></tr>`)}
+      <td>${escapeHtml(r.createdByName||'—')}</td><td>${editDeleteActions('sale', r.id)}</td></tr>`)}
   `;
 }
 function openSaleModal(){
@@ -994,11 +1341,11 @@ function renderPurchases(){
     ${monthSwitcherHTML('purchaseMonth','Purchases —')}
     <div class="sec-head"><h3>Purchases <span>${rows.length} records · ${inr(monthTotal)} in ${monthLabel(ym)}</span></h3>
       <button class="btn" onclick="openPurchaseModal()">+ New Purchase</button></div>
-    ${tableOrEmpty(rows, ['Date','Purchase ID','Item','Seller','Price ₹','Paid','Due','By'], r=>`
+    ${tableOrEmpty(rows, ['Date','Purchase ID','Item','Seller','Price ₹','Paid','Due','By','Action'], r=>`
       <tr><td>${fmtDate(r.date)}</td><td class="mono">${r.id}</td><td>${escapeHtml(r.productLabel||'—')}</td>
       <td>${escapeHtml(r.sellerName||'—')}</td><td class="mono">${inr(r.purchasePrice*(r.qty||1))}</td><td class="mono">${inr(r.amountPaid)}</td>
       <td>${r.due>0?`<span class="pill amber">${inr(r.due)}</span>`:`<span class="pill green">Paid</span>`}</td>
-      <td>${escapeHtml(r.createdByName||'—')}</td></tr>`)}
+      <td>${escapeHtml(r.createdByName||'—')}</td><td>${editDeleteActions('purchase', r.id)}</td></tr>`)}
     <div class="note">New purchases automatically add a matching Stock item (condition: Old, status: In Stock).</div>
   `;
 }
@@ -1352,9 +1699,9 @@ function renderExpenses(){
   return `
     <div class="sec-head"><h3>Expenses <span>${rows.length} entries · ${inr(total)} total</span></h3>
       <button class="btn" onclick="openExpenseModal()">+ Add Expense</button></div>
-    ${tableOrEmpty(rows, ['Date','Expense ID','Category','Note','Mode','By','Amount'], r=>`
+    ${tableOrEmpty(rows, ['Date','Expense ID','Category','Note','Mode','By','Amount','Action'], r=>`
       <tr><td>${fmtDate(r.date)}</td><td class="mono">${r.id}</td><td>${escapeHtml(r.category)}</td><td>${escapeHtml(r.note||'—')}</td>
-      <td>${r.paymentMode}${r.bankId?' · '+bankName(r.bankId):''}</td><td>${escapeHtml(r.createdByName||'—')}</td><td class="mono">${inr(r.amount)}</td></tr>`)}
+      <td>${r.paymentMode}${r.bankId?' · '+bankName(r.bankId):''}</td><td>${escapeHtml(r.createdByName||'—')}</td><td class="mono">${inr(r.amount)}</td><td>${editDeleteActions('expense', r.id)}</td></tr>`)}
   `;
 }
 function openExpenseModal(){
