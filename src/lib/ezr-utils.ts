@@ -1,0 +1,17 @@
+import type { Cache, Stock, Sale } from '@/types/ezr';
+export const pad=(n:number,len:number)=>String(n).padStart(len,'0');
+export const inr=(n:unknown)=>'₹'+Number(n||0).toLocaleString('en-IN');
+export const todayISO=()=>{ const d=new Date(); const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; };
+export const fmtDate=(iso?:string)=>{if(!iso)return '—';const d=new Date(`${iso}T00:00:00`);return Number.isNaN(d.valueOf())?iso:d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});};
+export const monthLabel=(ym:string)=>{if(!ym)return '—';const [y,m]=ym.split('-').map(Number);return new Date(y,m-1,1).toLocaleDateString('en-GB',{month:'long',year:'numeric'});};
+export const quarterOfMonth=(m:number)=>Math.floor((m-1)/3)+1;
+export const ymToQuarterKey=(ym:string)=>{const[y,m]=ym.split('-').map(Number);return `${y}-Q${quarterOfMonth(m)}`};
+export const quarterLabel=(qKey:string)=>{const[y,q]=qKey.split('-Q');const r:Record<string,string>={1:'Jan–Mar',2:'Apr–Jun',3:'Jul–Sep',4:'Oct–Dec'};return `${r[q]} ${y} (Q${q})`;};
+export const stockTotalCost=(s?:Stock)=>!s?0:Number(s.purchasePrice||0)+(s.modifications||[]).reduce((sum,m)=>sum+(m.type==='Removed'?-Number(m.cost||0):Number(m.cost||0)),0);
+export const saleGrossProfit=(sale:Sale,cache:Cache)=>{if(sale.stockSource==='new'&&sale.newProductId){const p=cache.newStock.find(x=>x.id===sale.newProductId);return p?Number(sale.salePrice||0)-Number(p.purchasePrice||0)*Number(sale.quantity||1):null}const st=cache.stock.find(x=>x.id===sale.stockId);return st?Number(sale.salePrice||0)-stockTotalCost(st):null};
+export const cashOpening=(c:Cache)=>Number(c.settings.cash_opening||0);
+export const cashBalance=(c:Cache)=>cashOpening(c)+c.ledger.filter(l=>l.mode==='Cash').reduce((s,l)=>s+Number(l.amount),0);
+export const bankBalance=(id:string,c:Cache)=>{const b=c.banks.find(x=>x.id===id);return b?Number(b.openingBalance||0)+c.ledger.filter(l=>l.mode==='Bank'&&l.bankId===id).reduce((s,l)=>s+Number(l.amount),0):0};
+export const totalBankBalance=(c:Cache)=>c.banks.reduce((s,b)=>s+bankBalance(b.id,c),0);
+export const totalCustomerDue=(c:Cache)=>c.sales.reduce((s,x)=>s+Number(x.due||0),0);
+export const totalSellerDue=(c:Cache)=>c.purchases.reduce((s,x)=>s+Number(x.due||0),0);

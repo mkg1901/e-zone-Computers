@@ -1,0 +1,15 @@
+export type Profile={id:string;fullName:string;role:string};
+export type Customer={id:string;name:string;phone?:string;address?:string;gstin?:string};
+export type Seller=Customer;
+export type Bank={id:string;name:string;accountNumber?:string;openingBalance:number};
+export type StockModification={description:string;cost:number;date:string;mode?:string;bankId?:string|null;createdByName?:string;type:'Added'|'Removed';fieldKey?:string|null};
+export type Stock={id:string;category:string;condition:string;status:string;model?:string;processor?:string;motherboard?:string;ram?:string;gpu?:string;ssd?:string;hdd?:string;display?:string;serial?:string;accessoryType?:string;brand?:string;description?:string;purchasePrice:number;purchaseDate?:string;sellerId?:string|null;sellerName?:string;notes?:string;createdByName?:string;blockedFor?:string|null;modifications:StockModification[]};
+export type NewStockSerial={id:string;productId:string;serialNumber:string;sold:boolean;saleId?:string|null};
+export type NewStockProduct={id:string;accessoryType:string;brand:string;modelNo:string;quantity:number;initialQuantity:number;purchasePrice:number;purchaseDate:string;sellerId?:string|null;sellerName?:string;paymentMode:string;bankId?:string|null;createdByName?:string;serials:NewStockSerial[]};
+export type Purchase={id:string;stockId?:string;sellerId?:string;sellerName?:string;productLabel?:string;purchasePrice:number;qty:number;date:string;paymentMode:string;bankId?:string|null;amountPaid:number;due:number;createdByName?:string};
+export type Sale={id:string;billNo?:string;stockId?:string;stockLabel?:string;buyerId?:string;buyerName?:string;salePrice:number;date:string;paymentMode:string;bankId?:string|null;amountReceived:number;due:number;createdByName?:string;stockSource?:'legacy'|'new';newProductId?:string|null;quantity:number;unitPrice:number;serialNumbers:string[]};
+export type Expense={id:string;category:string;amount:number;paymentMode:string;bankId?:string|null;date:string;note?:string;createdByName?:string};
+export type Ledger={id:string;date:string;type:string;mode:string;bankId?:string|null;amount:number;refType?:string|null;refId?:string|null;note?:string;createdByName?:string};
+export type CallLodge={id:string;date:string;category:string;customerId?:string|null;customerName?:string;customerPhone?:string;customerAddress?:string;description?:string;status:string;serviceNote?:string;createdByName?:string};
+export type WhatsAppDelivery={id:number;saleId:string;customerId?:string|null;phone:string;status:'pending'|'sent'|'failed';messageId?:string|null;mediaId?:string|null;errorMessage?:string;sentAt?:string|null;createdByName?:string;createdAt:string};
+export type Cache={customers:Customer[];sellers:Seller[];banks:Bank[];settings:Record<string,unknown>;stock:Stock[];newStock:NewStockProduct[];purchases:Purchase[];sales:Sale[];expenses:Expense[];ledger:Ledger[];accessoryTypes:string[];callLodges:CallLodge[];whatsappDeliveries:WhatsAppDelivery[]};
