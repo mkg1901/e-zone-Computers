@@ -86,3 +86,13 @@ tr.transaction-transfer>td:nth-child(2),tr.transaction-transfer>td:last-child{fo
 
 .accountLedgerTitle{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:14px 0 10px}.accountLedgerTitle h3{margin:0 0 4px}.accountLedgerTitle span{font-size:11px;color:var(--muted)}.accountSelector{display:flex;align-items:center;justify-content:flex-end;gap:9px;color:var(--muted);font-size:12px;margin:12px 0}.accountSelector select{min-width:220px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px}.accountLedger th:nth-child(n+4):nth-child(-n+6),.accountLedger td:nth-child(n+4):nth-child(-n+6){text-align:right;white-space:nowrap}
 .accountLedgerControls{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.accountLedgerControls .tabs{margin-bottom:0}.accountLedgerControls>label{display:flex;align-items:center;gap:8px;margin-left:auto;color:var(--muted);font-size:12px}.accountLedgerControls input{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px}
+
+.salesActions{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;white-space:nowrap}.salesActions .button{flex:none}
+.capacityInput{display:flex;align-items:stretch}.capacityInput input{border-radius:10px 0 0 10px}.capacityInput span{display:flex;align-items:center;padding:0 11px;background:var(--panel2);color:var(--muted);border:1px solid var(--line);border-left:0;border-radius:0 10px 10px 0;font-size:12px;font-weight:800}.field>small{display:block;color:var(--muted);font-size:10px;margin-top:5px}
+
+.modal:has(.oldStockEntry){width:min(900px,100%)}
+.oldStockCategory{grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:11px}
+.oldStockFields{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:11px;margin-bottom:11px}
+.oldStockFields>*{grid-column:span 4}
+.oldStockEntry--desktop .oldStockPaymentField,.oldStockEntry--accessories .oldStockPaymentField{grid-column:span 3}
+@media(max-width:760px){.oldStockCategory{grid-template-columns:1fr}.oldStockFields>*{grid-column:1/-1!important}}
