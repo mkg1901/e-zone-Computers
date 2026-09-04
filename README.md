@@ -182,3 +182,7 @@ Browser and WhatsApp PDF invoices no longer use a separate Serial No. column. Wh
 ### Password reset using email OTP
 
 The login page now includes **Reset password with email OTP** for existing staff/admin accounts. Staff verify the recovery code sent to their registered email (including Gmail) and set a new password. No new account is created, and the recovery session does not replace the normal login session. See `supabase/PASSWORD_RESET_SETUP.md` and `supabase/templates/reset-password-otp.html` for the required Supabase email-template and SMTP configuration. This is Auth configuration, not a SQL migration. Live delivery has not been verified.
+
+### Grouped New Stock and FIFO
+
+Matching item type, brand and model (ignoring case and outer spaces) display as one product. Quantities are summed, purchase prices shown as a range, and sellers separated by commas. Original purchase batches remain for costs, dues and deletion. New-stock billing splits quantities across original batches, oldest purchase date first; same-date ties use creation time then ID. Available serial choices use the same batch order, then serial creation time and ID. Apply `supabase/migrations/20260904_new_stock_fifo.sql` after the serial-tracking migration to enforce non-serial FIFO in the database. This migration does not merge or rewrite existing records.

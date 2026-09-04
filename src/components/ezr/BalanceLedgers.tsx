@@ -1,0 +1,20 @@
+'use client';
+import {useState} from 'react';
+import {fmtDate,inr,monthLabel,todayISO} from '@/lib/ezr-utils';
+import type {Bank,Ledger} from '@/types/ezr';
+export type AccountLedgerLine={id:string;date:string;particulars:string;reference:string;debit:number;credit:number;balance:number;by:string};
+const relevant=(entries:Ledger[],mode:'Cash'|'Bank',bankId?:string)=>entries.filter(row=>row.mode===mode&&(mode==='Cash'||row.bankId===bankId));
+export function accountLedger(entries:Ledger[],opening:number,mode:'Cash'|'Bank',bankId?:string):AccountLedgerLine[]{
+ const chronological=relevant(entries,mode,bankId).sort((a,b)=>a.date.localeCompare(b.date)||String(a.id).localeCompare(String(b.id),undefined,{numeric:true}));let balance=Number(opening||0);
+ return chronological.map(row=>{const amount=Number(row.amount||0);balance=Math.round((balance+amount)*100)/100;return{id:row.id,date:row.date,particulars:(row.type||'Transaction')+(row.note?' · '+row.note:''),reference:[row.refType,row.refId].filter(Boolean).join(' ')||'—',debit:amount>0?amount:0,credit:amount<0?-amount:0,balance,by:row.createdByName||'—'}}).reverse();
+}
+export function monthlyAccountLedger(entries:Ledger[],opening:number,month:string,mode:'Cash'|'Bank',bankId?:string){
+ const accountRows=relevant(entries,mode,bankId),broughtForward=Math.round((Number(opening||0)+accountRows.filter(row=>row.date.slice(0,7)<month).reduce((sum,row)=>sum+Number(row.amount||0),0))*100)/100;
+ const rows=accountLedger(accountRows.filter(row=>row.date.slice(0,7)===month),broughtForward,mode,bankId);
+ return{broughtForward,closing:rows[0]?.balance??broughtForward,rows};
+}
+function LedgerTable({title,month,opening,closing,entries}:{title:string;month:string;opening:number;closing:number;entries:AccountLedgerLine[]}){return <><div className="accountLedgerTitle"><div><h3>{title} · {monthLabel(month)}</h3><span>Balance brought forward: {inr(opening)}</span></div><strong>Closing balance: {inr(closing)}</strong></div><div className="tableWrap"><table className="accountLedger"><thead><tr>{['Date','Particulars','Reference','Debit (In)','Credit (Out)','Balance','By'].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{entries.map(row=><tr key={row.id}><td>{fmtDate(row.date)}</td><td>{row.particulars}</td><td>{row.reference}</td><td className="positive">{row.debit?inr(row.debit):'—'}</td><td className="negative">{row.credit?inr(row.credit):'—'}</td><td><b>{inr(row.balance)}</b></td><td>{row.by}</td></tr>)}</tbody></table>{!entries.length&&<div className="empty">No transactions recorded for this month.</div>}</div></>}
+export function BalanceLedgers({ledger,cashOpening,banks}:{ledger:Ledger[];cashOpening:number;banks:Bank[]}){
+ const[view,setView]=useState<'cash'|'bank'>('cash'),[bankId,setBankId]=useState(banks[0]?.id||''),[month,setMonth]=useState(todayISO().slice(0,7));const bank=banks.find(b=>b.id===bankId)||banks[0],statement=view==='cash'?monthlyAccountLedger(ledger,cashOpening,month,'Cash'):bank?monthlyAccountLedger(ledger,bank.openingBalance,month,'Bank',bank.id):null;
+ return <><div className="accountLedgerControls"><div className="tabs"><button className={`tab ${view==='cash'?'active':''}`} onClick={()=>setView('cash')}>Cash Ledger</button><button className={`tab ${view==='bank'?'active':''}`} onClick={()=>setView('bank')}>Bank Ledger</button></div><label>Ledger month<input type="month" value={month} max={todayISO().slice(0,7)} onChange={e=>setMonth(e.target.value)}/></label></div>{view==='cash'&&statement?<LedgerTable title="Cash Ledger" month={month} opening={statement.broughtForward} closing={statement.closing} entries={statement.rows}/>:bank&&statement?<><label className="accountSelector">Bank account<select value={bank.id} onChange={e=>setBankId(e.target.value)}>{banks.map(item=><option key={item.id} value={item.id}>{item.name}{item.accountNumber?` · ${item.accountNumber}`:''}</option>)}</select></label><LedgerTable title={`${bank.name} Ledger`} month={month} opening={statement.broughtForward} closing={statement.closing} entries={statement.rows}/></>:<div className="empty">No bank accounts have been added.</div>}</>;
+}
