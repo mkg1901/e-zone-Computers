@@ -69,84 +69,74 @@ function wrapText(text: string, maxChars: number) {
   return lines.length ? lines : [''];
 }
 
-export async function buildInvoicePdf(input: {
-  sale: any;
-  customer: any;
-  settings: Record<string, string>;
-}) {
-  const { sale, customer, settings } = input;
-  const pdf = await PDFDocument.create();
-  const page = pdf.addPage([595.28, 841.89]);
-  const regular = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const { width, height } = page.getSize();
-  const margin = 45;
-  let y = height - margin;
-  const draw = (text: string, x: number, size = 10, isBold = false) => {
-    page.drawText(safe(text), { x, y, size, font: isBold ? bold : regular, color: rgb(0.08, 0.08, 0.08) });
+export async function buildInvoicePdf(input: {sale:any;customer:any;settings:Record<string,string>}) {
+  const {sale,customer,settings}=input;
+  const pdf=await PDFDocument.create();
+  const regular=await pdf.embedFont(StandardFonts.Helvetica),bold=await pdf.embedFont(StandardFonts.HelveticaBold);
+  const width=595.28,height=841.89,margin=40,right=width-margin;
+  let page=pdf.addPage([width,height]),y=height-margin;
+  const text=(value:unknown,x:number,atY:number,size=9,strong=false)=>page.drawText(safe(value),{x,y:atY,size,font:strong?bold:regular,color:rgb(.08,.08,.08)});
+  const rule=(atY:number)=>page.drawLine({start:{x:margin,y:atY},end:{x:right,y:atY},thickness:.6,color:rgb(.7,.7,.7)});
+  const wrap=(value:unknown,maxWidth:number,size=9)=>{
+    const result:string[]=[];
+    for(const paragraph of safe(value).split(/\r?\n/)){
+      let line='';
+      for(const word of paragraph.split(/\s+/).filter(Boolean)){
+        if(line&&regular.widthOfTextAtSize(line+' '+word,size)>maxWidth){result.push(line);line='';}
+        let rest=word;
+        while(regular.widthOfTextAtSize(rest,size)>maxWidth){let cut=1;while(cut<rest.length&&regular.widthOfTextAtSize(rest.slice(0,cut+1),size)<=maxWidth)cut++;if(line){result.push(line);line='';}result.push(rest.slice(0,cut));rest=rest.slice(cut);}
+        line=line?line+' '+rest:rest;
+      }
+      result.push(line);
+    }
+    return result.length?result:[''];
   };
-  const line = (fromX: number, toX: number, atY: number, thickness = 1) => page.drawLine({ start: { x: fromX, y: atY }, end: { x: toX, y: atY }, thickness, color: rgb(0.35, 0.35, 0.35) });
-
-  const shopName = settings.shop_name || 'e-Zone Computers';
-  draw(shopName, margin, 20, true);
-  page.drawText('SALE INVOICE', { x: width - margin - 120, y, size: 15, font: bold });
-  y -= 22;
-  for (const addressLine of wrapText(settings.shop_address || '', 62).slice(0, 3)) { draw(addressLine, margin, 9); y -= 12; }
-  if (settings.shop_phone) { draw(`Phone: ${settings.shop_phone}`, margin, 9); y -= 12; }
-  if (settings.shop_email) { draw(`Email: ${settings.shop_email}`, margin, 9); y -= 12; }
-  if (settings.shop_gstin) { draw(`GSTIN: ${settings.shop_gstin}`, margin, 9); y -= 12; }
-  const stateLine = [settings.shop_state, settings.shop_state_code ? `State Code: ${settings.shop_state_code}` : ''].filter(Boolean).join(' | ');
-  if (stateLine) { draw(stateLine, margin, 9); y -= 12; }
-
-  page.drawText(`Invoice: ${safe(sale.bill_no || sale.id)}`, { x: width - margin - 170, y: height - margin - 28, size: 10, font: bold });
-  page.drawText(`Date: ${safe(sale.date)}`, { x: width - margin - 170, y: height - margin - 44, size: 10, font: regular });
-  line(margin, width - margin, y - 2, 1.4);
-  y -= 24;
-
-  draw('Bill To', margin, 11, true); y -= 16;
-  draw(safe(sale.buyer_name || customer?.name || 'Customer'), margin, 10, true); y -= 14;
-  for (const addr of wrapText(customer?.address || '', 70).slice(0, 3)) { if (addr) { draw(addr, margin, 9); y -= 12; } }
-  if (customer?.phone) { draw(`Phone: ${customer.phone}`, margin, 9); y -= 12; }
-  if (customer?.gstin) { draw(`GSTIN: ${customer.gstin}`, margin, 9); y -= 12; }
-  y -= 8;
-
-  const cols = [margin, margin + 30, margin + 260, margin + 360, margin + 405, width - margin];
-  const rowTop = y;
-  line(margin, width - margin, rowTop, 1);
-  page.drawText('#', { x: cols[0] + 5, y: y - 16, size: 9, font: bold });
-  page.drawText('Description', { x: cols[1] + 5, y: y - 16, size: 9, font: bold });
-  page.drawText('Serial No.', { x: cols[2] + 5, y: y - 16, size: 9, font: bold });
-  page.drawText('Qty', { x: cols[3] + 5, y: y - 16, size: 9, font: bold });
-  page.drawText('Rate', { x: cols[4] + 5, y: y - 16, size: 9, font: bold });
-  y -= 26;
-  line(margin, width - margin, y, 0.8);
-  page.drawText('1', { x: cols[0] + 5, y: y - 18, size: 9, font: regular });
-  const desc = safe(sale.stock_label || 'Item').slice(0, 38);
-  page.drawText(desc, { x: cols[1] + 5, y: y - 18, size: 9, font: regular });
-  const serials = Array.isArray(sale.serial_numbers) && sale.serial_numbers.length ? sale.serial_numbers.join(', ') : '-';
-  page.drawText(serials.slice(0, 20), { x: cols[2] + 5, y: y - 18, size: 8, font: regular });
-  page.drawText(String(sale.quantity || 1), { x: cols[3] + 8, y: y - 18, size: 9, font: regular });
-  page.drawText(money(Number(sale.unit_price || sale.sale_price || 0)).replace('INR ', ''), { x: cols[4] + 5, y: y - 18, size: 8, font: regular });
-  y -= 30;
-  line(margin, width - margin, y, 1);
-  for (const x of cols) page.drawLine({ start: { x, y: rowTop }, end: { x, y }, thickness: 0.6, color: rgb(0.55, 0.55, 0.55) });
-
-  y -= 30;
-  const totalX = width - margin - 210;
-  page.drawText('Total', { x: totalX, y, size: 10, font: bold });
-  page.drawText(money(Number(sale.sale_price || 0)), { x: totalX + 95, y, size: 10, font: bold }); y -= 17;
-  page.drawText('Received', { x: totalX, y, size: 9, font: regular });
-  page.drawText(money(Number(sale.amount_received || 0)), { x: totalX + 95, y, size: 9, font: regular }); y -= 17;
-  page.drawText('Balance Due', { x: totalX, y, size: 10, font: bold });
-  page.drawText(money(Number(sale.due || 0)), { x: totalX + 95, y, size: 10, font: bold });
-
-  y -= 55;
-  if (settings.invoice_terms) {
-    draw('Terms:', margin, 9, true); y -= 13;
-    for (const termLine of wrapText(settings.invoice_terms, 88).slice(0, 5)) { draw(termLine, margin, 8); y -= 11; }
+  const rightText=(value:string,end:number,atY:number,maxWidth:number,strong=false)=>{const font=strong?bold:regular;let size=9;while(font.widthOfTextAtSize(value,size)>maxWidth&&size>5)size-=.25;text(value,end-font.widthOfTextAtSize(value,size),atY,size,strong);};
+  const newPage=()=>{page=pdf.addPage([width,height]);y=height-margin;text(`Invoice ${safe(sale.bill_no||sale.id)} - continued`,margin,y,10,true);y-=24;};
+  const ensure=(space:number)=>{if(y-space<55)newPage();};
+  const block=(value:unknown,size=9,strong=false)=>{for(const line of wrap(value,right-margin,size)){ensure(size+6);text(line,margin,y,size,strong);y-=size+5;}};
+  const shop=settings.shop_name||'e-Zone Computers';
+  block(shop,18,true);block('SALE INVOICE',12,true);
+  if(settings.shop_address)block(settings.shop_address);
+  if(settings.shop_phone)block(`Phone: ${settings.shop_phone}`);
+  if(settings.shop_email)block(`Email: ${settings.shop_email}`);
+  if(settings.shop_gstin)block(`GSTIN: ${settings.shop_gstin}`);
+  if(settings.shop_state||settings.shop_state_code)block([settings.shop_state,settings.shop_state_code?`State Code: ${settings.shop_state_code}`:''].filter(Boolean).join(' | '));
+  y-=5;block(`Invoice: ${safe(sale.bill_no||sale.id)}     Date: ${safe(sale.date)}`,10,true);rule(y);y-=20;
+  block('Bill To',10,true);block(sale.buyer_name||customer?.name||'Customer',10,true);
+  if(customer?.address)block(customer.address);
+  if(customer?.phone)block(`Phone: ${customer.phone}`);
+  if(customer?.gstin)block(`GSTIN: ${customer.gstin}`);
+  block(`Payment Mode: ${safe(sale.payment_mode)}`);y-=10;
+  const cols=[margin,margin+24,margin+310,margin+350,margin+435,right];
+  const tableHeader=()=>{ensure(30);rule(y);['#','Description','Qty','Rate','Amount'].forEach((label,i)=>text(label,cols[i]+4,y-15,8,true));y-=23;rule(y);};
+  tableHeader();
+  const lines=Array.isArray(sale.line_items)&&sale.line_items.length?sale.line_items:[{stock_label:sale.stock_label||'Item',quantity:sale.quantity||1,unit_price:sale.unit_price??sale.sale_price??0,serial_numbers:sale.serial_numbers||[]}];
+  const invoiceRows=lines.map((line:any,index:number)=>({number:String(index+1),description:safe(line.stock_label),serials:Array.isArray(line.serial_numbers)?line.serial_numbers.filter(Boolean):[],quantity:Number(line.quantity||1),rate:Number(line.unit_price||0),amount:Math.round(Number(line.unit_price||0)*100)*Number(line.quantity||1)/100}));
+  if(Number(sale.service_charge||0)>0)invoiceRows.push({number:'',description:'Service Charge',serials:[],quantity:1,rate:Number(sale.service_charge),amount:Number(sale.service_charge)});
+  for(const row of invoiceRows){
+    const description=wrap(row.description,cols[2]-cols[1]-8,9).map(value=>({value,size:9,height:13}));
+    const serialText=row.serials.length?`S/N - ${row.serials.join(', ')}`:'';
+    const serials=serialText?wrap(serialText,cols[2]-cols[1]-8,6.3).map(value=>({value,size:6.3,height:9})):[];
+    const segments=[...description,...serials];let offset=0,first=true;
+    while(offset<segments.length){
+      if(y-28<55){newPage();tableHeader();}
+      const available=y-65;let take=0,contentHeight=0;
+      while(offset+take<segments.length&&contentHeight+segments[offset+take].height<=available){contentHeight+=segments[offset+take].height;take++;}
+      if(take===0){newPage();tableHeader();continue;}
+      const top=y,rowHeight=contentHeight+10;let lineY=top-15;
+      for(let n=0;n<take;n++){const segment=segments[offset+n];text(segment.value,cols[1]+4,lineY,segment.size);lineY-=segment.height;}
+      if(first){text(row.number,cols[0]+4,top-15,8);rightText(String(row.quantity),cols[3]-4,top-15,cols[3]-cols[2]-8);rightText(money(row.rate).replace('INR ',''),cols[4]-4,top-15,cols[4]-cols[3]-8);rightText(money(row.amount).replace('INR ',''),cols[5]-4,top-15,cols[5]-cols[4]-8);first=false;}
+      y-=rowHeight;rule(y);for(const x of cols)page.drawLine({start:{x,y:top},end:{x,y},thickness:.4,color:rgb(.8,.8,.8)});
+      offset+=take;if(offset<segments.length){newPage();tableHeader();}
+    }
   }
-  page.drawText('Authorized Signatory', { x: width - margin - 120, y: 90, size: 9, font: regular });
-  page.drawText(shopName.slice(0, 36), { x: width - margin - 120, y: 74, size: 9, font: bold });
+  ensure(110);y-=24;
+  for(const [label,value] of [['Total',sale.sale_price],['Received',sale.amount_received],['Balance Due',sale.due]] as [string,number][]){text(label,right-220,y,10,true);rightText(money(Number(value||0)),right,y,125,true);y-=19;}
+  y-=15;
+  if(settings.invoice_terms){block('Terms:',9,true);block(settings.invoice_terms,8);}
+  ensure(65);y-=25;text('Authorized Signatory',right-130,y,9);y-=15;for(const line of wrap(shop,160,8)){ensure(15);text(line,right-160,y,8);y-=12;}
+  const pages=pdf.getPages();pages.forEach((p,index)=>p.drawText(`Page ${index+1} of ${pages.length}`,{x:margin,y:25,size:8,font:regular,color:rgb(.4,.4,.4)}));
   return pdf.save();
 }
 
