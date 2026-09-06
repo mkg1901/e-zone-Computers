@@ -1,6 +1,6 @@
 -- DESTRUCTIVE MANUAL OPERATION
 -- Clears test/business records so the EZR system can start with real data.
--- Preserves auth.users, public.profiles, public.settings, public.accessory_types,
+-- Preserves auth.users, public.profiles, public.settings, public.accessory_types, public.expense_types,
 -- database schema, functions, policies, and migrations.
 -- Run only in the intended Supabase project after reviewing the scope below.
 
