@@ -13,8 +13,8 @@ export const cashOpening=(c:Cache)=>Number(c.settings.cash_opening||0);
 export const cashBalance=(c:Cache)=>cashOpening(c)+c.ledger.filter(l=>l.mode==='Cash').reduce((s,l)=>s+Number(l.amount),0);
 export const bankBalance=(id:string,c:Cache)=>{const b=c.banks.find(x=>x.id===id);return b?Number(b.openingBalance||0)+c.ledger.filter(l=>l.mode==='Bank'&&l.bankId===id).reduce((s,l)=>s+Number(l.amount),0):0};
 export const totalBankBalance=(c:Cache)=>c.banks.reduce((s,b)=>s+bankBalance(b.id,c),0);
-export const totalCustomerDue=(c:Cache)=>c.sales.reduce((s,x)=>s+Number(x.due||0),0);
-export const totalSellerDue=(c:Cache)=>c.purchases.reduce((s,x)=>s+Number(x.due||0),0);
+export const totalCustomerDue=(c:Cache)=>c.sales.reduce((s,x)=>s+Number(x.due||0),0)+c.openingDues.filter(x=>x.partyKind==='customer').reduce((s,x)=>s+Math.max(0,x.amount-x.paidAmount),0);
+export const totalSellerDue=(c:Cache)=>c.purchases.reduce((s,x)=>s+Number(x.due||0),0)+c.openingDues.filter(x=>x.partyKind==='seller').reduce((s,x)=>s+Math.max(0,x.amount-x.paidAmount),0);
 
 // Check the projected ledger before any related stock/accounting writes.
 export function assertLedgerChange(c:Cache, amount:number, mode:string, bankId?:string|null, refType?:string, refId?:string){

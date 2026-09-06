@@ -9,6 +9,7 @@ begin;
 truncate table
   public.invoice_whatsapp_deliveries,
   public.person_due_payments,
+  public.opening_dues,
   public.cash_bank_transfers,
   public.stock_modifications,
   public.new_stock_serials,
@@ -64,6 +65,7 @@ union all select 'invoice_whatsapp_deliveries', count(*) from public.invoice_wha
 union all select 'ledger', count(*) from public.ledger
 union all select 'new_stock_products', count(*) from public.new_stock_products
 union all select 'new_stock_serials', count(*) from public.new_stock_serials
+union all select 'opening_dues', count(*) from public.opening_dues
 union all select 'person_due_payments', count(*) from public.person_due_payments
 union all select 'purchases', count(*) from public.purchases
 union all select 'sales', count(*) from public.sales

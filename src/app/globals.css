@@ -96,3 +96,5 @@ tr.transaction-transfer>td:nth-child(2),tr.transaction-transfer>td:last-child{fo
 .oldStockFields>*{grid-column:span 4}
 .oldStockEntry--desktop .oldStockPaymentField,.oldStockEntry--accessories .oldStockPaymentField{grid-column:span 3}
 @media(max-width:760px){.oldStockCategory{grid-template-columns:1fr}.oldStockFields>*{grid-column:1/-1!important}}
+
+.duesToolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.duesToolbar .tabs{margin-bottom:0}.duesToolbar>.button{margin-bottom:1px}
