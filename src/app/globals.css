@@ -8,10 +8,14 @@
 tr.transaction-spending>td{background:#fff1f2;color:#be123c}
 tr.transaction-purchase>td{background:#fefce8;color:#854d0e}
 tr.transaction-sale>td{background:#ecfdf5;color:#047857}
+tr.transaction-payment-received>td{background:linear-gradient(90deg,#f1fdf8,#f9fffc);color:#087a5b}
+tr.transaction-payment-seller>td{background:linear-gradient(90deg,#fffceb,#fffff8);color:#8a5a12}
 tr.transaction-spending>td:first-child{box-shadow:inset 3px 0 #ef4444}
 tr.transaction-purchase>td:first-child{box-shadow:inset 3px 0 #eab308}
 tr.transaction-sale>td:first-child{box-shadow:inset 3px 0 #10b981}
-tr:is(.transaction-spending,.transaction-purchase,.transaction-sale)>td:nth-child(2),tr:is(.transaction-spending,.transaction-purchase,.transaction-sale)>td:last-child{font-weight:700}
+tr.transaction-payment-received>td:first-child{box-shadow:inset 3px 0 #6ee7b7}
+tr.transaction-payment-seller>td:first-child{box-shadow:inset 3px 0 #fde68a}
+tr:is(.transaction-spending,.transaction-purchase,.transaction-sale,.transaction-payment-received,.transaction-payment-seller)>td:nth-child(2),tr:is(.transaction-spending,.transaction-purchase,.transaction-sale,.transaction-payment-received,.transaction-payment-seller)>td:last-child{font-weight:700}
 
 tr.transaction-transfer>td{background:#f3f4f6;color:#4b5563}
 tr.transaction-transfer>td:first-child{box-shadow:inset 3px 0 #9ca3af}
@@ -68,6 +72,8 @@ tr.transaction-transfer>td:nth-child(2),tr.transaction-transfer>td:last-child{fo
 [data-theme=black] tr.transaction-spending>td{background:#3a1015;color:#ff9baa}
 [data-theme=black] tr.transaction-purchase>td{background:#3a2a06;color:#f5d36a}
 [data-theme=black] tr.transaction-sale>td{background:#0e3326;color:#3ddc97}
+[data-theme=black] tr.transaction-payment-received>td{background:linear-gradient(90deg,#142b24,#101f1a);color:#79ddb2}
+[data-theme=black] tr.transaction-payment-seller>td{background:linear-gradient(90deg,#302b17,#211f16);color:#ead887}
 [data-theme=black] tr.transaction-transfer>td{background:#303744;color:#d1d5db}
 [data-theme=black] ::selection{background:#1a8b96;color:#fff}
 [data-theme=black] ::-webkit-scrollbar-thumb{background:#23304a;border-radius:6px}
