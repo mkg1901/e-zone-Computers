@@ -104,3 +104,5 @@ tr.transaction-transfer>td:nth-child(2),tr.transaction-transfer>td:last-child{fo
 @media(max-width:760px){.oldStockCategory{grid-template-columns:1fr}.oldStockFields>*{grid-column:1/-1!important}}
 
 .duesToolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.duesToolbar .tabs{margin-bottom:0}.duesToolbar>.button{margin-bottom:1px}
+
+.salesHeaderTotal{display:inline-flex;align-items:center;gap:7px;margin-left:9px;padding:7px 11px;border:1px solid #bfdbfe;border-radius:999px;background:linear-gradient(135deg,#eff6ff,#ecfdf5);color:#31506f;font-size:14px;font-weight:600;box-shadow:0 3px 10px rgba(37,99,235,.08)}.salesHeaderTotal b{font-size:16px;color:#0f766e}.salesHeaderTotal i{font-style:normal;color:#93a4b8}[data-theme=black] .salesHeaderTotal{background:linear-gradient(135deg,#14243c,#113127);border-color:#285078;color:#b8c9dd;box-shadow:none}[data-theme=black] .salesHeaderTotal b{color:#63dfb2}
